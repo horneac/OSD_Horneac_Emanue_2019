@@ -1,0 +1,112 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%
+%%% File: thesis.tex, version 0.1, May 2010
+%%%
+%%% =============================================
+%%% This file contains a template that can be used with the package
+%%% cs.sty and LaTeX2e to produce a thesis that meets the requirements
+%%% of the Computer Science Department from the Technical University of Cluj-Napoca
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[12pt,a4paper,twoside,openright]{report}
+
+\usepackage{cs}
+
+\begin{document}
+
+\graphicspath{{figures/}}
+\ifpdf
+  \DeclareGraphicsExtensions{.pdf,.jpeg,.png}
+\else
+  \DeclareGraphicsExtensions{.eps}
+\fi
+
+% \mastersthesis
+\diplomathesis
+% \leftchapter
+% \centerchapter
+% \rightchapter
+\singlespace
+% \oneandhalfspace
+% \doublespace
+
+\renewcommand{\thesisauthor}{Alexandru Gurzou}
+\renewcommand{\thesisyear}{2016}
+\renewcommand{\thesistitle}{HAL9000}
+\newcommand{\projectname}{HAL9000 }
+
+\begin{titlepage}
+
+\thispagestyle{firststylewithoutfooter}
+
+\begin{center}
+%{\scshape \universitynameenglish} \\
+{\scshape \facultynameenglish} \\
+{\scshape \departmentnameenglish} \\
+
+\vspace{6cm}
+
+\thesistitlesize {\textbf{\thesistitle}\\}
+\vspace {1cm}
+
+\thesistypesize An educational operating system for teaching SMP systems
+in an 64-bit x86 environment\\
+
+\vspace{2cm}
+
+\thesisauthortypesize \textbf{\thesisauthor} \\
+% \thesisauthortypesize \thesisauthortyperomanian \\ \textbf{\thesisauthor} \\
+
+\vspace{1cm}
+
+\vspace{\stretch{1}}
+	{
+		\begin{flushright}
+	  \scriptsize{\textit{The 9000 series is the most reliable computer ever made. No 9000 computer has ever made a mistake or distorted information. We are all, by any practical definition of the words, foolproof and incapable of error.}}
+
+		- HAL 9000 \cite{2001aspaceOdyssey}
+		\end{flushright}
+	}
+{\thesisyear} \\
+\end{center}
+\end{titlepage}
+
+%\pagestyle{headings}
+
+% ABSTRACT
+
+
+%\thesistitle                    %% Generate the title page.
+%\authordeclarationpage                %% Generate the declaration page.
+
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+\tableofcontents
+
+%\shorttoc{Detailed Contents}{4}
+\newpage
+
+% \clearpage
+\newpage
+
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\pagestyle{normalpagestyle}
+\renewcommand{\chaptermark}[1]{ \markboth{\thechapter. #1}{} }
+\renewcommand{\sectionmark}[1]{ \markright{\thesection. #1}{} }
+
+
+\include{ch1}
+\include{ch2}
+\include{ch3}
+\include{ch4}
+
+\include{apendix}
+
+%\addcontentsline {toc}{chapter}{Bibliography}
+\bibliographystyle{IEEEtran}
+\bibliography{HAL9000}%same file name as for .bib
+
+\end{document}

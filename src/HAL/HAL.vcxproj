@@ -1,0 +1,204 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{0AAEEAA7-E70D-41BE-ABE4-34FD9449870E}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>HAL</RootNamespace>
+    <WindowsTargetPlatformVersion>$(WindowsDefaultSDK)</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(SolutionDir)..\tools\vsyasm\vsyasm.props" />
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)..\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)..\temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetExt>.lib</TargetExt>
+    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <RunCodeAnalysis>true</RunCodeAnalysis>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)..\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)..\temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetExt>.lib</TargetExt>
+    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
+    <RunCodeAnalysis>true</RunCodeAnalysis>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>headers;inc;..\commonlib\inc</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <CompileAsManaged>false</CompileAsManaged>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <OmitFramePointers>true</OmitFramePointers>
+      <StringPooling>true</StringPooling>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <OpenMPSupport>false</OpenMPSupport>
+      <ShowIncludes>false</ShowIncludes>
+      <EnablePREfast>true</EnablePREfast>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <SDLCheck>true</SDLCheck>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <YASM>
+      <AdditionalOptions>-f x64 -X vc %(AdditionalOptions)</AdditionalOptions>
+    </YASM>
+    <PostBuildEvent>
+      <Command>..\..\postbuild\place_files.cmd $(ProjectName) $(SolutionDir) $(PlatformName) $(ConfigurationName) $(SolutionName) $(TargetName) $(TargetExt)</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>headers;inc;..\commonlib\inc</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <CompileAsManaged>false</CompileAsManaged>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <OmitFramePointers>true</OmitFramePointers>
+      <StringPooling>true</StringPooling>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ExceptionHandling>false</ExceptionHandling>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <OpenMPSupport>false</OpenMPSupport>
+      <ShowIncludes>false</ShowIncludes>
+      <EnablePREfast>true</EnablePREfast>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <SDLCheck>true</SDLCheck>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <YASM>
+      <AdditionalOptions>-f x64 -X vc %(AdditionalOptions)</AdditionalOptions>
+    </YASM>
+    <PostBuildEvent>
+      <Command>..\..\postbuild\place_files.cmd $(ProjectName) $(SolutionDir) $(PlatformName) $(ConfigurationName) $(SolutionName) $(TargetName) $(TargetExt)</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\cmos.c" />
+    <ClCompile Include="src\gdt.c" />
+    <ClCompile Include="src\hal.c" />
+    <ClCompile Include="src\hw_fpu.c" />
+    <ClCompile Include="src\idt.c" />
+    <ClCompile Include="src\ioapic.c" />
+    <ClCompile Include="src\lapic.c" />
+    <ClCompile Include="src\pci.c" />
+    <ClCompile Include="src\pcie.c" />
+    <ClCompile Include="src\pci_device.c" />
+    <ClCompile Include="src\pic.c" />
+    <ClCompile Include="src\pit.c" />
+    <ClCompile Include="src\pte.c" />
+    <ClCompile Include="src\rtc.c" />
+    <ClCompile Include="src\serial.c" />
+    <ClCompile Include="src\tss.c" />
+    <ClCompile Include="src\vmx.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="headers\hal_base.h" />
+    <ClInclude Include="headers\ioapic_registers.h" />
+    <ClInclude Include="headers\lapic_registers.h" />
+    <ClInclude Include="headers\pci_common.h" />
+    <ClInclude Include="inc\apic_common.h" />
+    <ClInclude Include="inc\cmos.h" />
+    <ClInclude Include="inc\cpu.h" />
+    <ClInclude Include="inc\cpuid_leaf.h" />
+    <ClInclude Include="inc\cpu_if.h" />
+    <ClInclude Include="inc\cpu_utils.h" />
+    <ClInclude Include="inc\gdt.h" />
+    <ClInclude Include="inc\hal.h" />
+    <ClInclude Include="inc\hw_fpu.h" />
+    <ClInclude Include="inc\idt.h" />
+    <ClInclude Include="inc\int15.h" />
+    <ClInclude Include="inc\ioapic.h" />
+    <ClInclude Include="inc\lapic.h" />
+    <ClInclude Include="inc\msr.h" />
+    <ClInclude Include="inc\mtrr.h" />
+    <ClInclude Include="inc\pci.h" />
+    <ClInclude Include="inc\pcie.h" />
+    <ClInclude Include="inc\pci_device.h" />
+    <ClInclude Include="inc\pci_registers.h" />
+    <ClInclude Include="inc\pic.h" />
+    <ClInclude Include="inc\pit.h" />
+    <ClInclude Include="inc\pte.h" />
+    <ClInclude Include="inc\register.h" />
+    <ClInclude Include="inc\rtc.h" />
+    <ClInclude Include="inc\serial.h" />
+    <ClInclude Include="inc\tss.h" />
+    <ClInclude Include="inc\vmcs_fields.h" />
+    <ClInclude Include="inc\vmx.h" />
+    <ClInclude Include="inc\vmx_exit.h" />
+    <ClInclude Include="inc\vmx_exit_reasons.h" />
+    <ClInclude Include="inc\yasm_imports.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <YASM Include="src\_exports.yasm">
+      <FileType>Document</FileType>
+    </YASM>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(SolutionDir)..\tools\vsyasm\vsyasm.targets" />
+  </ImportGroup>
+</Project>

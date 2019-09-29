@@ -1,0 +1,492 @@
+\chapter{Project 3: Virtual Memory}
+
+\section{Overview}
+
+By now your OS can load multiple user applications at once, it can service their requests for
+accessing system resources and for managing processes and threads. However, the number and size of
+programs that can run is limited by the machine's main memory size. In this assignment, you will
+remove that limitation.
+
+You will build this assignment on top of the last one. Test programs from project 2 should also work
+with project 3. You should take care to fix any bugs in your project 2 submission before you start
+work on project 3, because those bugs will most likely cause the same problems in project 3.
+
+\projectname already supports some virtual memory features such as lazy mapping and memory mapped
+files and makes extensive use of them already, so you won't have to intervene in those areas.
+However, you will have to implement the system calls to allow a user-application to dynamically
+allocate and free virtual memory - this could allow a user application to implement a heap allocator.
+Moreover, this memory must be shareable by any number of processes.
+
+You will also have to implement per process quotas: you should limit the number of physical frames
+a process uses and the number of open files a process can have at once.
+
+And finally you will implement a swapping mechanism which will cause frame eviction to occur either 
+when there are no more free frames in physical memory or when a process reaches its frame quota.
+
+\subsection{Memory Terminology}
+Careful definitions are needed to keep discussion of virtual memory from being confusing. Thus, we
+begin by presenting some terminology for memory and storage.
+
+\subsubsection{Pages}
+
+A page, sometimes called a virtual page, is a continuous region of virtual memory 4,096 bytes (the 
+page size) in length. A page must be page-aligned, that is, start on a virtual address evenly
+divisible by the page size. A 64-bit virtual addresses can be divided into 6 sections as illustrated
+below:
+\begin{itemize}
+	\item The most significant 16 bits are unused because they reflect the 47th bit.
+	\item The next 4 sections of 9 bits each provide an index into to the corresponding paging table
+structure.
+	\item The final 12 bits provide the offset within the final physical address.
+\end{itemize}
+
+\begin{verbatim}
+63             48 47     39 38     30 29     21 20     12 11          0
++----------------+---------+---------+---------+---------+------------+
+| Unused         |  PML4   | Dir Ptr |   Dir   |  Table  |   Offset   |
++----------------+---------+---------+---------+---------+------------+
+                             Virtual Address
+\end{verbatim}
+
+Each process has an independent set of user (virtual) pages, which are those pages below virtual 
+address 0x8'0000'0000'0000 (128 TiB), while the kernel virtual space begins at 
+\var{gVirtualToPhysicalOffset} which is typically 0xFFFF'8000'0000'0000 (almost 16 EiB). The set of
+kernel (virtual) pages, on the other hand, is global, remaining the same regardless of what thread  
+or process is active. The kernel may access both user and kernel pages, but a user process may 
+access only its own user pages. See \fullref{sect:VirtMemLayout} for more information.
+
+\projectname provides several useful functions for working with virtual addresses. See 
+\fullref{sect:VirtAddr} for details.
+
+\subsubsection{Frames}
+
+A frame, sometimes called a physical frame or a page frame, is a continuous region of physical
+memory. Like pages, frames must be page-size and page-aligned. Even if the processor runs in 64-bits
+mode the maximum physical address is not $2^{64}$ (16 EiB), the maximum addressable physical address
+differs from CPU to CPU (this value can be found out by querying a CPUID leaf), however, according 
+to the Intel manual the maximum physical address size is limited to $2^{52}$ bits (4 PiB).
+
+Thus, a 52-bit physical address can be divided into a 40-bit frame number and a 12-bit frame offset,
+(or just offset) like this:
+
+\begin{verbatim}
+63    52                  12 11         0
++-------+-------------------+-----------+
+| 00000 |      Frame Number |   Offset  |
++-------+-------------------+-----------+
+              Physical Address
+\end{verbatim}
+
+When paging is enabled the x86 architecture works with virtual addresses, transparently accessing
+the physical memory mapped by the address. Thus, the software executing does not need to know the
+actual whereabouts of the memory or the memory topology found in the system,
+
+\projectname provides functions for translating between physical addresses and kernel virtual
+addresses. See \fullref{sect:VirtAddr} for details.
+
+\subsubsection{Page Tables}
+
+The x86 processors translate virtual addresses to physical addresses through the use of some hardware
+defined structures, called paging tables. These are hierarchical structures which describe the
+virtual address space and provide the final physical address, they also specify the access rights
+(read/write/execute) and the privilege level required (kernel or user-mode access). \projectname
+provides page table management code in \file{pte.h}. See \fullref{sect:PageTables} for more
+information.
+
+The diagram below illustrates the relationship between pages and frames. The virtual address, on the
+left, consists of 4 page indexes (one for each paging level) and an offset. The paging tables
+translate the page indexes into a frame number, which is combined with the unmodified offset to 
+obtain the physical address, on the right.
+
+\begin{verbatim}
+                      +-------------+
+    .---------------->|Paging Tables|---------.
+    |                 +-------------+         |
+47  |    12 11      0                  52     V   12 11      0
++----------+--------+                  +------------+--------+
+| Page Idx | Offset |                  | Frame No   | Offset |
++----------+--------+                  +------------+--------+
+ Virt Addr     |                              Phys Addr ^
+               \_______________________________________/
+\end{verbatim}
+
+A more detailed illustration is given in \fullref{fig:PageTranslation}, here, what was previously
+called "Page Idx" is now properly separated into its 4 parts: the index in the PML4 table, the index
+in the PDPT table, the index in the PD table and the index in the PT table.
+
+\begin{figure}
+\begin{verbatim}
+47      39 38     30 29     21 20     12 11          0
++---------+---------+---------+---------+------------+
+| PML4 Idx| PDPT Idx| PD Idx  | PT Idx  | Page Offset|
++---------+---------+---------+---------+------------+
+    |          |        |         |            |___________
+____/          |        \_____    \__________              \
+/              |              \              \              \
+/      PML4    |      PDPT    |       PD     |       PT     |       Data Page
+/    ._______. |    ._______. |    ._______. |    ._______. |    .____________.
+| 511|_______| | 511|_______| | 511|_______| | 511|_______| |    |____________|
+| 510|_______| | 510|_______| | 510|_______| | 510|_______| |    |____________|
+| 509|_______| | 509|_______| | 509|_______| | 509|_______| |    |____________|
+| 508|_______| | 508|_______| | 508|_______| | 508|_______| |    |____________|
+|    |       | |    |       | |    |       | |    |       | |    |            |
+|    |       | \___\|   .   | \___\|   .   | \___\|   .   | \___\|     .      |
+|    |   .   |     /|   .   |     /|   .   |     /|   .   |     /|     .      |
+\___\|   .   |_     |   .   |_     |   .   |_     |   .   |_     |     .      |
+    /|   .   | \    |   .   | \    |   .   | \    |   .   | \    |     .      |
+     |   .   | |    |   .   | |    |   .   | |    |   .   | |    |     .      |
+     |       | |    |       | |    |       | |    |       | |    |            |
+     |_______| |    |_______| |    |_______| |    |_______| |    |____________|
+    4|_______| |   4|_______| |   4|_______| |   4|_______| |    |____________|
+    3|_______| |   3|_______| |   3|_______| |   3|_______| |    |____________|
+    2|_______| |   2|_______| |   2|_______| |   2|_______| |    |____________|
+    1|_______| |   1|_______| |   1|_______| |   1|_______| |    |____________|
+    0|_______| \__\0|_______| \__\0|_______| \__\0|_______| \__\ |____________|
+                  /              /              /              /
+\end{verbatim}
+		\caption{Detailed paging}
+	\label{fig:PageTranslation}
+\end{figure}
+
+\subsubsection{Swap Slots}
+
+A swap slot is a continuous, page-size region of disk space in the swap partition. Although hardware
+limitations dictating the placement of slots are looser than for pages and frames, swap slots should
+be page-aligned because there is no downside in doing so.
+
+\subsection{Memory Management Initialization}
+
+Before reading this section, you should first read \fullref{sect:MemManagement}.
+
+The initialization of the memory subsystem begins in \func{MmuInitSystem} which aggregates two
+other subsystems: physical memory subsystem (PMM) and virtual memory subsystem (VMM). Once these
+systems are initialized two heap allocators are built on top of them.
+
+The PMM will be the first one initialized by a call to \func{PmmInitSystem}, this function uses the
+information provided by the firmware to determine how much physical memory the system possesses and
+which frames are free for use. A bitmap is then initialized to track the usage of physical frames,
+however no additional information is kept except if the frame is available or not. Because the size
+of physical memory doesn't change after boot and the size of a frame is fixed to 4 KiB in size a
+bitmap is perfect for this job.
+
+Once this function returns, physical frames can be allocated using \func{PmmReserveMemoryEx} and
+freed using \func{PmmReleaseMemory}: these functions simply flip some bits in the bitmap to mark if
+a frame is free or taken.
+
+Now, some continuous physical frames are allocated for the new paging table structures, this is done
+in \func{\_MmuInitPagingSystem}, these structures will be mapped in virtual space at
+\var{gVirtualToPhysicalOffset} (0xFFFF'8000'0000'0000) + \textit{PHYSICAL\_ADDRESS}. Because these
+structures are found at continous physical addresses and have a formula to determine their virtual
+address the page manipulation algorithms are simplified.
+
+The VMM is now initialized through a call to \func{VmmInit}, this initializes the virtual address
+space for the system process, once this call finishes \func{VmmAllocRegionEx} and 
+\func{VmmFreeRegionEx} can be used. The VMM manages the address space for each process in the sense
+that it holds information about all the virtual memory it committed or reserved - this is required
+for implementing lazy mapping and memory mapped files.
+
+The kernel image will now be remapped using the new paging tables which were previously created, two
+mappings are done: an identity mapping (this is required by the application processors when they
+start-up and activate paging) and a mapping similar to the one used for the paging tables, where
+the \macro{PA2VA} and \macro{VA2PA} macros can be used.
+
+The change to the new paging tables is done through a simple MOV to CR3 assembly instruction using
+the \func{\_\_writecr3} intrinsic function. After this change two heaps will be initialized, one
+will be used for allocations created through \func{ExAllocatePoolWithTag}, the other is used
+explicitly by \func{MmuReleaseMemory}.
+
+After the application processors are woken up the kernel identity mappings are discarded by a call
+to \func{MmuDiscardIdentityMappings}.
+
+\subsection{Resource Management Overview}
+
+You will need to design or augment the following data structures:
+
+\begin{itemize}
+	\item Supplemental page table
+	
+		Enables page fault handling by supplementing the hardware page table, see \fullref{sect:MngSpTable}.
+		
+	\item Frame table
+	
+		Allows efficient implementation of eviction policy, see \fullref{sect:MngFrameTable}.
+		
+	\item Swap table
+	
+		Tracks usage of swap slots,  see \fullref{sect:MngSwapTable}.
+\end{itemize}
+
+You do not necessarily need to implement three completely distinct data structures: it may be
+convenient to wholly or partially merge related resources into a unified data structure.
+
+For each data structure, you need to determine what information each element should contain. You
+also need to decide on the data structure’s scope, either local (per-process) or global (applying to
+the whole system), and how many instances are required within its scope.
+
+Possible choices of data structures include arrays, lists, bitmaps, and hash tables. An array is
+often the simplest approach, but a sparsely populated array wastes memory. Lists are also simple,
+but traversing a long list to find a particular position wastes time. Both arrays and lists can be
+re-sized, but lists more efficiently support insertion and deletion in the middle.
+
+Although more complex data structures may yield performance or other benefits, they may also
+needlessly complicate your implementation. Thus, we do not recommend implementing any advanced data
+structure (e.g. a balanced binary tree) as part of your design.
+
+\subsubsection{Managing the Supplemental Page Table}
+\label{sect:MngSpTable}
+
+The supplemental page table supplements the page table with additional data about each page. It is
+needed because of the limitations imposed by the page table’s format. Such a data structure is often
+called a "page table" also; we add the word "supplemental" to reduce confusion.
+
+The supplemental page table is used for at least two purposes. Most importantly, on a page fault,
+the kernel looks up the virtual page that faulted in the supplemental page table to find out what
+data should be there. Second, the kernel consults the supplemental page table when a process
+terminates, to decide what resources to free.
+
+Because \projectname already supports lazy mappings and can handle page faults, such a table already
+exits for each process, and the structure used to describe each mapping is \textit{VMM\_RESERVATION},
+see \fullref{sect:VMM} for details.
+
+You could use this already existing data structure and augment it with further information or you
+could use a whole different structure.
+
+\subsubsection{Managing the Frame Table}
+\label{sect:MngFrameTable}
+
+The frame table contains one entry for each frame that contains a user page. Each entry in the frame
+table contains a pointer to the page, if any, that currently occupies it, and other data of your
+choice. The frame table allows \projectname to efficiently implement an eviction policy, by choosing
+a page to evict when no frames are free.
+
+The frames are obtained by calling \func{PmmReserveMemory} or \func{PmmReserveMemoryEx} and are
+freed using \func{PmmReleaseMemory}.
+
+The most important operation on the frame table is obtaining an unused frame. This is easy when a
+frame is free. When none is free, or when the process has reached its physical frame quota a frame
+must be made free by evicting some page from its frame.
+
+If no frame can be evicted without allocating a swap slot, but the swap is full, panic the kernel.
+Real OSes apply a wide range of policies to recover from or prevent such situations, but these
+policies are beyond the scope of this project.
+
+The process of eviction comprises roughly the following steps:
+\begin{enumerate}
+	\item Choose a frame to evict, using your page replacement algorithm. The 'accessed' and
+'dirty' bits in the page table, described in \fullref{sect:ADBits} will come in handy.
+
+	\item Remove references to the frame from any page table that refers to it. Be careful, once you
+have implemented shared memory multiple pages can refer to the same frame at a given time.
+
+	\item If necessary, write the page to the file system or to swap.
+\end{enumerate}
+The evicted frame may then be used to store a different page.
+
+\subsubsection{Managing the Swap Table}
+\label{sect:MngSwapTable}
+
+The swap table tracks in-use and free swap slots. It should allow picking an unused swap slot for
+evicting a page from its frame to the swap partition. It should allow freeing a swap slot when its
+page is read back or the process whose page was swapped is terminated.
+
+You may obtain the swap file using \func{IomuGetSwapFile}, once you have the \textit{FILE\_OBJECT}
+structure you can simply use the \func{IoReadFile} and \func{IoWriteFile} functions to read and
+write from the swap FS. The only restriction is that the number of bytes transferred must be
+exactly the size of a page and the offset must also be page aligned.
+
+The size of the swap file is 128 MiB which should be sufficient for all the current tests (as long
+as cleanup properly occurs after process termination): at most 80 MiB will be used at a single time.
+
+\section{Assignment}
+
+\subsection{Per Process Quotas}
+
+You must implement a mechanism to keep track of the number of files currently held open by a process 
+and the number of physical frames it currently uses. These definitions are found in \file{process\_internal.h}
+and are \macro{PROCESS\_MAX\_PHYSICAL\_FRAMES} and \macro{PROCESS\_MAX\_OPEN\_FILES} both currently
+defined as 16.
+
+In case of a real OS the frames occupied by the binary would also add up to the physical frame quota,
+however, due to the way in which \projectname loads the applications in memory it would be very hard
+to implement this. As a result you will only have to count the frames allocated as a result of calls
+to \func{SyscallVirtualAlloc} and the frames occupied by the user stack.
+
+When the quota for files open is reached then that process should not be able to open any additional
+files until it closes another file.
+
+When the quota for physical frames is reached the eviction mechanism must be invoked, which will
+pick one of the processes frames, swap it to disk and use it for another virtual memory allocation.
+
+\subsection{System calls}
+
+You need to implement the \func{SyscallVirtualAlloc} and \func{SyscallVirtualFree} system calls,
+these allow user applications to allocate virtual memory in their address space.
+
+Most of the parameters are identical to their kernel counterparts: \func{VmmAllocRegionEx} and
+\func{VmmFreeRegionEx}. However, providing a MDL is not supported and instead of directly providing
+a FILE\_OBJECT structure these system calls take a UM\_HANDLE to represent the file to map.
+
+Also, you need to ensure that the user application is not allowed to specify both writable and
+executable rights to a memory region. When this happens the system call should fail.
+
+Also, the system call has an extra parameter, this is what allows the creation of shared memory (allows
+user applications to share data). This extra parameter is called \var{Key} and has the following
+semantics:
+\begin{itemize}
+	\item If the value is 0, the virtual allocation created is private for the current process.
+
+	\item If the value is non-zero then the memory backed by the virtual allocation received by the
+creator process can be accessed from any other process in the system. This is done by the second
+process calling \func{SyscallVirtualAlloc} specifying the same \var{Key} value as the creator. This
+means that \var{Key} acts as a global identifier which can be used by any other process in the
+system. An illustration is shown in \fullref{lst:SharedMemory}.
+
+	Assumming Process 0 starts execution first, when it calls \func{SyscallVirtualAlloc} the OS will
+see that \var{Key} has a value different from 0 and will check to see if there is already an
+allocation made with that key. Once it sees that there is none it will allocate a virtual range of
+a page size with write access. Because the process also specified a \var{Key} value different from 0
+the OS will also keep track of this allocation.
+
+	When Process 1 gets to the \func{SyscallVirtualAlloc} call the OS will check again if there is
+already an allocation using this key, it will find that there is already one previously created.
+Because of this the OS will use the same backing physical frames for the virtual range returned to
+the second process.
+
+	Because both virtual allocations (in each process) share the same frames the second process will
+display the string written by the first process.
+
+\end{itemize}
+
+\begin{lstlisting}[caption={Shared Memory},label={lst:SharedMemory}]
+#define SHARED_KEY_VALUE	0x371
+
+// Code executed by Process 0
+void Process0Code(void)
+{
+	STATUS status;
+	char* pData;
+	
+	status = SyscallVirtualAlloc(NULL, 
+	PAGE_SIZE, 
+	VMM_ALLOC_TYPE_RESERVE | VMM_ALLOC_TYPE_COMMIT,
+	PAGE_RIGHTS_READWRITE,
+	NULL,
+	SHARED_KEY_VALUE,
+	&pData);
+	ASSERT(SUCCEEDED(status));
+	
+	strcpy(pData, "Shared memory is the coolest thing ever!");
+	
+	// ... Other code ...
+}
+
+// Code executed by Process 1
+void Process1Code(void)
+{
+	STATUS status;
+	char* pData;
+	
+	status = SyscallVirtualAlloc(NULL, 
+	PAGE_SIZE, 
+	VMM_ALLOC_TYPE_RESERVE | VMM_ALLOC_TYPE_COMMIT,
+	PAGE_RIGHTS_READWRITE,
+	NULL,
+	SHARED_KEY_VALUE,
+	&pData);
+	ASSERT(SUCCEEDED(status));
+	
+	LOG("Data found in shared buffer is [%s]\n", pData);
+	
+	// ... Other code ...
+}
+\end{lstlisting}
+
+\subsection{Swapping}
+
+As previously mentioned, once a process reaches its quota for number of physical frames allocated
+the contents of a frame must be swapped out to disk.
+
+After the contents have been swapped out, another virtual address may be mapped into this physical
+frame. From the point of view of a user-application this is transparent, the application only
+works with virtual addresses and has no idea where the physical memory which actually holds the
+data resides.
+
+After you implemented the swap out operation be sure to also add support for swap in, else when the
+application accesses the virtual address corresponding to the frame previously swapped out the
+kernel won't be able to solve the \#PF exception. For this you will probably need to make changes
+in \func{VmmSolvePageFault} and use the supplemental page table to determine the location of the
+data on the swap file.
+
+\subsection{Zero Pages}
+
+You will also need to implement support for allocating pages initialized to zero. For this you will
+need to modify \func{VmmAllocRegionEx}, remove the assert at line 543 and provide your own
+implementation:
+\begin{verbatim}
+ASSERT(!IsBooleanFlagOn(AllocType, VMM_ALLOC_TYPE_ZERO));
+\end{verbatim}
+
+The trivial solution would be to simply mark that the page contains zeroes and when a page fault
+occurs to memzero the memory, however there are more elegant and efficient ways of implementing
+zero pages.
+
+One of the tests actually checks the following scenario: allocate 2 GiB of virtual memory and read
+the data from each page, you should remember that the swap file is only 128 MiB and a process is
+restricted to 16 frames of physical memory at a time.
+
+\section{Source Files}
+
+For this project most of your work will be done in the \textit{core/memory} filter and some will
+be done in \textit{usermode}. Here's a quick overview of the files you'll be interested in:
+
+\file{vmm.c}
+
+Implements the page fault handler in \func{VmmSolvePageFault}.
+
+\file{vm\_reservation\_space.c}
+
+Works with the \textit{VMM\_RESERVATION\_SPACE} structures (a.k.a. supplemental page table entries).
+
+\file{syscall.c}
+
+Provides the system call dispatcher \func{SyscallHandler}, you will need to implement the two system
+calls here.
+
+\file{iomu.h}
+
+Provides a pointer to an file instance to the swap file: \func{IomuGetSwapFile}.
+
+\file{io.h}
+
+Provides the IO functions for working with files: \func{IoFileRead} and \func{IoFileWrite}, you will
+need these for working with the swap file. You do not need to open or close the file, this is done
+by \projectname.
+
+\section{FAQ}
+
+\textbf{Q: Do we need a working Project 2 to implement Project 3?}
+
+A: Yes.
+
+\newline
+
+\textbf{Q: How do we resume a process after we have handled a \#PF?}
+
+A: Returnng from \func{VmmSolvePageFault} with TRUE resumes the current user process (see
+\fullref{sect:PfHandling}). It will then retry the instruction to which the instruction pointer
+points.
+
+\newline
+
+\textbf{Q: When sharing memory does \func{SyscallVirtualAlloc} need to return the same virtual
+address for both processes?}
+
+A: No, the value of the virtual address returned is irrelevant as long as it is backed up by the
+same physical frames.
+
+\newline
+
+\textbf{Q: Can we increase the size of the swap file?}
+
+A: Yes, you can, but you \textbf{MUST NOT} do so. The size was chosen as 128 MiB in such a way to
+accommodate all the tests requirements and to require an efficient implementation for zero pages.

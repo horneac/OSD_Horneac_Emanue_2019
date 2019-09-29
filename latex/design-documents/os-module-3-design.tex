@@ -1,0 +1,116 @@
+
+\chapter{Design of Module \textit{virtualmemory}}
+
+% ================================================================================= %
+\section{Assignment Requirements}
+
+
+\subsection{Initial Functionality}
+
+
+\subsection{Requirements}
+
+The requirements of the ``Virtual Memory'' assignment are the following:
+\begin{itemize}
+    \item \textit{Per Process Quotas}. You have to limit the number of open files a process can have
+and the number of physical frames it may use at one time.
+
+    \item \textit{System calls}. You have to implement two new system calls for allocating and
+de-allocating virtual memory. You must also support shared memory using this implementation.
+
+    \item \textit{Swapping}. You have to implement a page replacement algorithm (i.e. second chance)
+and swapping.
+
+    \item \textit{Zero Pages}. You have to implement support for allocating virtual pages filled with
+zero bytes.
+
+\end{itemize}
+
+
+The way to allocate requirements on member teams. 
+\begin{itemize}
+    \item 3-members teams
+        \begin{enumerate}
+            \item Per Process Quotas + Zero Pages
+            \item System calls
+            \item Swapping
+        \end{enumerate}
+\end{itemize}
+
+
+
+\subsection{Basic Use Cases}
+
+
+% ================================================================================= %
+\section{Design Description}
+
+\subsection{Needed Data Structures and Functions}
+
+
+
+\subsection{Detailed Functionality}
+
+Some questions you have to answer (taken from the original Pintos design templates):
+\begin{enumerate}
+    \item Process Quotas
+        \begin{itemize}
+            \item When sharing memory between processes the physical frames used should be counted in the quota for each process, how will you achieve this?
+        \end{itemize}
+
+    \item page table management
+        \begin{itemize}
+            \item In a few paragraphs, describe your code for locating the frame, if any, that contains the data of a given page.
+            
+            \item How does your code coordinate accessed and dirty bits between kernel and user virtual addresses that alias a single frame, or alternatively how do you avoid the issue?
+            
+            \item When two user processes both need a new frame at the same time, how are races avoided?
+        \end{itemize}
+    
+    \item page replacement and swapping
+        \begin{itemize}
+            \item When a frame is required but none is free, some frame must be evicted.  Describe your code for choosing a frame to evict.
+            
+            \item When a process P obtains a frame that was previously used by a process Q, how do you adjust the page table (and any other data structures) to reflect the frame Q no longer has?
+            
+            \item Explain the basics of your VM synchronization design. In particular, explain how it prevents deadlock. (Refer to the textbook for an explanation of the necessary conditions for deadlock.)
+            
+            \item A page fault in process P can cause another process Q's frame to be evicted. How do you ensure that Q cannot access or modify the page during the eviction process?  How do you avoid a race between P evicting Q's frame and Q faulting the page back in?
+            
+            \item Suppose a page fault in process P causes a page to be read from the file system or swap. How do you ensure that a second process Q cannot interfere by e.g. attempting to evict the frame while it is still being read in?
+            
+            \item Explain how you handle access to paged-out pages that occur during system calls.  Do you use page faults to bring in pages (as in user programs), or do you have a mechanism for "locking" frames into physical memory, or do you use some other design?  How do you gracefully handle attempted accesses to invalid virtual addresses?
+
+            \item  A single lock for the whole VM system would make synchronization easy, but limit parallelism.  On the other hand, using many locks complicates synchronization and raises the possibility for deadlock but allows for high parallelism.  Explain where your design falls along this continuum and why you chose to design it this way.
+        \end{itemize}
+
+    
+    \item Shared Memory
+        \begin{itemize}
+            \item What data do you need to maintain in order to be able to create and access shared memory regions? What data structure will you be using to maintain the keys?
+			
+			\item After creating a shared memory region, when it is accessed by the second process does the same virtual address need to be returned to the process? Motivate your answer.
+			
+			\item How will you know when to delete the shared memory region? Take this scenario as an example: a process creates a region and 7 other processes access it, i.e. they call \textit{SyscallVirtualAlloc} with the same key, how do you know when you need to delete the key from your list and implicitly the shared memory region? This region should be valid until the last process which 'opened' it 'closes' it, i.e. calls \textit{SyscallVirtualFree}.
+        \end{itemize}
+
+    \item Zero Pages
+        \begin{itemize}
+            \item How will you implement zero pages? How will you support accessing a range of zero memory larger than the swap file? Explain the algorithm required for your implementation.
+        \end{itemize}
+
+\end{enumerate}
+
+
+\subsection{Explanation of Your Design Decisions}
+
+
+% ================================================================================= %
+\section{Tests}
+
+
+
+% ================================================================================= %
+\section{Observations}
+
+

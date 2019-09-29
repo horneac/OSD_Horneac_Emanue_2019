@@ -1,0 +1,4 @@
+[Args.exe]:[Successfully validated the interface!]
+[Args.exe]:[Number of arguments 0x1]
+[Args.exe]:[Argument[0] is [Args.exe]]
+[Args.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

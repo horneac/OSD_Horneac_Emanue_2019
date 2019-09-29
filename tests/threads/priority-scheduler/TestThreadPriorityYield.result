@@ -1,0 +1,4 @@
+[TEST]Will create 1 threads for running test [TestThreadPriorityYield]
+[TEST]
+[PASS]
+[TEST]Thread [TestThreadPriorityYield-00] terminated with status: 0x0

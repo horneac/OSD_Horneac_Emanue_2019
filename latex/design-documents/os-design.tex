@@ -1,0 +1,78 @@
+
+\documentclass[a4paper,12pt]{report}
+
+\input{os-design.sty}
+
+% \newcommand{\OSName}{\textit{Nachos}}
+\newcommand{\OSName}{\textit{HAL9000}}
+
+\title{The Design of \OSName{} Operating System}
+
+\author{Students' Name}
+
+\onehalfspacing
+
+\begin{document}
+
+% \selectlanguage{english}
+% \selectlanguage{romanian}
+
+
+\maketitle
+
+\begin{abstract}
+The abstract should contain a very short description of the results presented in this report. 
+
+Take into account that a design document is a high-level, logical (abstract) description of the solution you propose to the problems and requirements you dealt with. Though, it should be detailed enough such that somebody who already knows and understands the requirements could implement (i.e. write the code) the design without having to take any significant additional design decisions. Even further, if such an implementer would happen to be an experienced one, he or she should be able to use the design document to implement the solution in just few hours (not necessarily including the debugging). 
+
+\textbf{Important notes}. Take care to remove from the given design document template all the text that was given to you as a guideline and provide your own document with only your own original text. Also, do not simply write anything in any section just to have some text there, but only write text that makes sense in the given context. We will not count the number of pages or words of your document, but will only evaluate the meaning and completeness of the written words. 
+\end{abstract}
+
+
+\chapter{General Presentation}
+
+\section{Working Team}
+
+Specify the working team members' names and their responsibility.
+
+\begin{enumerate}
+	\item Firstname1 Familyname1 
+	    \begin{enumerate}
+	     \item Threads: dealt with AAA
+	     \item Userprog: dealt with BBB
+	     \item VM: dealt with CCC
+	    \end{enumerate}
+
+	\item Firstname2 Familyname2
+	    \begin{enumerate}
+	     \item Threads: dealt with AAA
+	     \item Userprog: dealt with BBB
+	     \item VM: dealt with CCC
+	    \end{enumerate}
+	    
+	\item Firstname3 Familyname3
+	    \begin{enumerate}
+	     \item Threads: dealt with AAA
+	     \item Userprog: dealt with BBB
+	     \item VM: dealt with CCC
+	    \end{enumerate}
+
+	   
+\end{enumerate}
+
+
+% \section{System}
+
+\input{os-module-design-principles}
+
+
+\input{os-module-1-design}
+
+
+\input{os-module-2-design}
+
+
+\input{os-module-3-design}
+
+
+\end{document}

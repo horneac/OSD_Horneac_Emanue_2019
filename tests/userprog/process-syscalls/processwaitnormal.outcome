@@ -1,0 +1,12 @@
+Comparing files E:\WORKSPACE\PROJECTS\VS2015\HAL9000\SRC\..\TESTS\USERPROG\PROCESS-SYSCALLS\ProcessWaitNormal.result and E:\WORKSPACE\PROJECTS\VS2015\HAL9000\SRC\..\TESTS\USERPROG\PROCESS-SYSCALLS\PROCESSWAITNORMAL.TEST
+***** E:\WORKSPACE\PROJECTS\VS2015\HAL9000\SRC\..\TESTS\USERPROG\PROCESS-SYSCALLS\ProcessWaitNormal.result
+[dummyf~1.exe]:[Successfully validated the interface!]
+[dummyf~1.exe]:[Returned from main function, will call ThreadExit with status 0x88000003!]
+[ProcessWaitNormal.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
+***** E:\WORKSPACE\PROJECTS\VS2015\HAL9000\SRC\..\TESTS\USERPROG\PROCESS-SYSCALLS\PROCESSWAITNORMAL.TEST
+[dummyf~1.exe]:[Successfully validated the interface!]
+[dummyf~1.exe]:[Returned from main function, will call ThreadExit with status 0xE8000003!]
+[ProcessWaitNormal.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
+*****
+
+[FAIL]

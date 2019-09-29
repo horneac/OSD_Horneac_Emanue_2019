@@ -1,0 +1,6 @@
+[ThreadWaitNormal.exe]:[Successfully validated the interface!]
+[ThreadWaitNormal.exe]:[Hello from secondary thread!]
+[ThreadWaitNormal.exe]:[First secondary thread has finished execution!]
+[ThreadWaitNormal.exe]:[Hello from secondary thread!]
+[ThreadWaitNormal.exe]:[Second secondary thread has finished execution!]
+[ThreadWaitNormal.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

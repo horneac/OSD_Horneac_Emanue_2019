@@ -1,0 +1,2 @@
+[FileCreateBadPointer.exe]:[Successfully validated the interface!]
+[FileCreateBadPointer.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

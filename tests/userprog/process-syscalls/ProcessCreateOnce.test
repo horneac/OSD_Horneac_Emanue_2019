@@ -1,0 +1,4 @@
+[ProcessCreateOnce.exe]:[Successfully validated the interface!]
+[dummy.exe]:[Successfully validated the interface!]
+[dummy.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
+[ProcessCreateOnce.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

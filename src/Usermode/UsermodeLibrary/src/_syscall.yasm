@@ -1,0 +1,35 @@
+
+global SyscallEntry
+
+
+align 0x10, db 0x0
+[bits 64]
+; STATUS __cdecl* Syscall( IN SyscallNumber, Arg0, ..., Argn )
+SyscallEntry:
+    ; rcx and r11 (used in syscall) can be both clobbered => it's ok
+
+    push rbp
+
+    ; this should point to the start of the parameters
+    lea  rbp, [rsp + 0x10]
+
+    ; Place all the parameters on the stack, this is the
+    ; way in which the C code expects to take them
+    mov  [rbp],         rcx
+    mov  [rbp+0x8],     rdx
+    mov  [rbp+0x10],    r8
+    mov  [rbp+0x18],    r9
+
+    ; move syscall number in R8 as well
+    mov  r8,            rcx
+
+    push rdi
+
+    ; we need to preserve rax after syscall returns (will hold result)
+    syscall
+
+    pop rdi
+
+    pop rbp
+
+    ret

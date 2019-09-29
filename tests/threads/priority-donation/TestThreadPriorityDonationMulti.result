@@ -1,0 +1,11 @@
+[TEST]Will create 1 threads for running test [TestThreadPriorityDonationMulti]
+[TEST]Will check scenario 0x0
+[TEST]Donator thread with priority 20 will attempt to take mutex!
+[TEST]Donator thread with priority 24 will attempt to take mutex!
+[TEST]
+[PASS]
+[TEST]Donator thread with priority 24 acquired mutex!
+[TEST]Donator thread with priority 20 acquired mutex!
+[TEST]Donator thread with priority 24 released mutex!
+[TEST]Donator thread with priority 20 released mutex!
+[TEST]Thread [TestThreadPriorityDonationMulti-00] terminated with status: 0x0

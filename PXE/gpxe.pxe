@@ -1,0 +1,6 @@
+#!gpxe
+
+module -n Tests Tests.module
+
+kernel HAL9000.bin
+boot

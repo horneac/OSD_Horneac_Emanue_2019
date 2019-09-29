@@ -1,0 +1,2 @@
+[ERROR][test_priority_scheduler.c][182]The thread should not have any uninterrupted ticks, it should have yielded the CPUin a RR fashion to the next thread in list!
+[FAIL]

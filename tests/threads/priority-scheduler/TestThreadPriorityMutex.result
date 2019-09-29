@@ -1,0 +1,33 @@
+[TEST]Will create 16 threads for running test [TestThreadPriorityMutex]
+[TEST]Thread [TestThreadPriorityMutex-0E] with priority 15 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-0F] with priority 15 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-0D] with priority 13 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-0C] with priority 12 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-0B] with priority 11 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-0A] with priority 10 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-09] with priority 9 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-08] with priority 8 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-07] with priority 7 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-06] with priority 6 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-05] with priority 5 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-04] with priority 4 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-03] with priority 3 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-02] with priority 2 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-01] with priority 1 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-00] with priority 0 received MUTEX!
+[TEST]Thread [TestThreadPriorityMutex-00] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-01] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-02] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-03] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-04] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-05] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-06] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-07] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-08] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-09] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0A] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0B] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0C] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0D] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0E] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityMutex-0F] terminated with status: 0x0

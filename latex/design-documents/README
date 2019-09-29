@@ -1,0 +1,22 @@
+Writing LATEX docs
+
+Linux
+Install texlive packages
+sudo apt-get install texlive-...
+
+Install one Latex editor
+- kile: sudo apt-get install kile
+- texmaker: sudo apt-get install texmaker
+
+
+Windows
+Install MikTex package. See the link below:
+http://www.miktex.org/2.9/setup
+
+Install one Latex editor:
+- TexMaker: http://www.xm1math.net/texmaker/index.html
+- TexnikCenter: http://www.texniccenter.org/
+
+Latex Docs
+http://en.wikibooks.org/wiki/LaTeX
+

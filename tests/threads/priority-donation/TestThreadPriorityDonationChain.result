@@ -1,0 +1,48 @@
+[TEST]Will create 1 threads for running test [TestThreadPriorityDonationChain]
+[TEST]Will run test for 0x8 threads!
+[test_priority_donation.c][376]Thread 0x0 will acquire mutex 0x0 and 0x7
+[test_priority_donation.c][376]Thread 0x1 will acquire mutex 0x1 and 0x0
+[test_priority_donation.c][376]Thread 0x2 will acquire mutex 0x2 and 0x1
+[test_priority_donation.c][376]Thread 0x3 will acquire mutex 0x3 and 0x2
+[test_priority_donation.c][376]Thread 0x4 will acquire mutex 0x4 and 0x3
+[test_priority_donation.c][376]Thread 0x5 will acquire mutex 0x5 and 0x4
+[test_priority_donation.c][376]Thread 0x6 will acquire mutex 0x6 and 0x5
+[test_priority_donation.c][376]Thread 0x7 will acquire mutex 0x7 and 0x6
+[TEST]Thread 0x24 got the first lock!
+[TEST]Thread 0x28 got the first lock!
+[TEST]Thread 0x2C got the first lock!
+[TEST]Thread 0x30 got the first lock!
+[TEST]Thread 0x34 got the first lock!
+[TEST]Thread 0x38 got the first lock!
+[TEST]Thread 0x3C got the first lock!
+[TEST]
+[PASS]
+[TEST]Thread 0x24 got the second lock
+[TEST]Thread 0x24 released the second lock
+[TEST]Thread 0x24 released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x28 got the second lock
+[TEST]Thread 0x28 released the second lock
+[TEST]Thread 0x28 released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x2C got the second lock
+[TEST]Thread 0x2C released the second lock
+[TEST]Thread 0x2C released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x30 got the second lock
+[TEST]Thread 0x30 released the second lock
+[TEST]Thread 0x30 released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x34 got the second lock
+[TEST]Thread 0x34 released the second lock
+[TEST]Thread 0x34 released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x38 got the second lock
+[TEST]Thread 0x38 released the second lock
+[TEST]Thread 0x38 released the first lock
+It should have reverted to its original priority!
+[TEST]Thread 0x3C got the second lock
+[TEST]Thread 0x3C released the second lock
+[TEST]Thread 0x3C released the first lock
+It should have reverted to its original priority!
+[TEST]Thread [TestThreadPriorityDonationChain-00] terminated with status: 0x0

@@ -1,0 +1,109 @@
+global __magic
+global __sti_and_hlt
+global __ltr    
+global __sgdt
+global __reloadGDT
+global __changeStack
+global __HALreadfsqword
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __magic(void)
+__magic:
+    xchg    bx, bx
+    ret
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __sti_and_hlt(void)
+__sti_and_hlt:
+    sti
+    hlt
+    ret
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __ltr( IN WORD GdtIndex )
+__ltr:
+    ltr     cx
+    ret
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __sgdt( OUT PGDT Gdt )
+__sgdt:
+    sgdt    [rcx]
+    ret
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __reloadGDT( GDT* Gdt, IN WORD CodeSegmentSelector, IN WORD DataSegmentSelector )
+__reloadGDT:
+    mov     r10,    rsp
+
+    mov     rax,    rcx
+    lgdt    [rax]
+    
+    xor     rax,    rax
+    mov     ax,     dx
+    
+    push    rax
+    call    $ + 5                   ; place return EIP onto the stack
+    mov     eax,    10              ; instrux length to continue right after 'retf'
+    add     [rsp],  eax
+    retf
+
+    mov     ax,     r8w
+    mov     fs,     ax
+    mov     gs,     ax
+    
+[bits 32]
+    mov     ss,     ax
+[bits 64]
+    mov     rsp,    r10
+    
+    ret
+
+
+align 0x10, db 0
+[BITS 64]
+; void __cdecl __changeStack( IN PVOID InitialStackBase, IN PVOID NewStackBase )
+__changeStack:
+    push    rdi
+    push    rsi
+
+    mov     r10,    rcx
+
+    mov     rsi,    rcx     ; initial stack base
+    sub     rsi,    1
+
+    mov     rdi,    rdx     ; new stack
+    sub     rdi,    1
+
+    mov     rax,    rcx     ; rax <- initial stack base
+    sub     rax,    rsp     ; rax <- current stack pointer
+    mov     rcx,    rax     ; rcx <- how much of stack is used
+    
+    std                     ; we want to go backwards
+    
+    rep     movsb           ; we move the stack
+    
+    mov     rax,    r10
+    sub     rax,    rsp
+    
+    sub     rdx,    rax
+    
+    mov     rsp,    rdx
+    
+    pop     rsi
+    pop     rdi
+
+    cld
+
+    ret
+
+align 0x10, db 0
+[bits 64]
+__HALreadfsqword:
+    mov rax, [fs:ecx]
+    ret

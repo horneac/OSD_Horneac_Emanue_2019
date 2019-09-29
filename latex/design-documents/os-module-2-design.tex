@@ -1,0 +1,125 @@
+
+\chapter{Design of Module \textit{Userprog}}
+
+% ================================================================================= %
+\section{Assignment Requirements}
+
+
+\subsection{Initial Functionality}
+
+
+\subsection{Requirements}
+
+The major requirements of the ``Userprog'' assignment, inspired from the original Pintos documentation, are the following:
+\begin{itemize}
+    \item \textit{System Calls for Process Management}. You have to implement the system calls \textit{SyscallProcessExit()}, \textit{SyscallProcessCreate()}, \textit{SyscallProcessGetPid()}, \textit{SyscallProcessWaitForTermination()} and \textit{SyscallProcessCloseHandle()}.
+
+    \item \textit{System Calls for Thread Management}. You have to implement the system calls \textit{SyscallThreadExit()}, \textit{SyscallThreadCreate()}, \textit{SyscallThreadGetTid()}, \textit{SyscallThreadWaitForTermination()} and \textit{SyscallThreadCloseHandle()}.
+
+    \item \textit{Program Argument Passing}. You have to change new process creation, such that the program arguments to be passed on its user-space stack.
+    
+    \item \textit{System Calls for File System Access}. You have to implement system calls for opening existing files or creating new files (\textit{SyscallFileCreate()}), reading data from a file \textit{SyscallFileRead()} and closing a file \textit{SyscallFileClose()}).
+\end{itemize}
+
+Some additional (and optional) requirements of the ``Userprog'' assignment, specific to UTCN / CS OSD course could be: 
+\begin{itemize}
+    \item \textit{IPC mechanisms}. You have to add in-kernel support for IPC mechanisms (pipes, shared memory) and the corresponding system calls (also including synchronization mechanisms) for user applications.
+    
+    \item \textit{Dynamic Memory Allocation Support}. Add in kernel support for mapping new areas in the application's virtual address space and also support managing dynamically allocated memory and corresponding system calls.
+    
+    \item \textit{Code Sharing Support}. Add support for sharing common code of different processes.
+   
+%     \item  \textit{Dynamically Linking Libraries}. 
+%     \item \textit{Copy-on-Write}
+\end{itemize}
+
+
+The way to allocate requirements on member teams. 
+\begin{itemize}
+    \item 3-members teams
+        \begin{enumerate}
+            \item argument passing + validation of system call arguments (pointers)
+            
+            \item system calls for process management + file system access
+            
+            \item system calls for thread management
+            
+        \end{enumerate}
+
+    \item 4-members teams (exceptional cases)
+        \begin{enumerate}
+            \item argument passing + validation of system call arguments (pointers)
+            
+            \item system calls for process management + file system access
+            
+            \item system calls for thread management
+            
+            \item IPC mechanisms
+        \end{enumerate}
+
+     \item optional subjects (for extra points)
+        \begin{itemize}
+            \item code memory sharing support
+            \item dynamic memory allocation support
+        \end{itemize}
+
+\end{itemize}
+
+
+\subsection{Basic Use Cases}
+
+
+% ================================================================================= %
+\section{Design Description}
+
+\subsection{Needed Data Structures and Functions}
+
+
+
+\subsection{Detailed Functionality}
+
+
+Some questions you have to answer (inspired from the original Pintos design templates):
+\begin{enumerate}
+    \item argument passing
+        \begin{itemize}
+            \item Briefly describe how you implemented argument parsing.  How do you arrange for the elements of argv[] to be in the right order? How do you avoid overflowing the stack page?
+            
+            \item Why does \OSName{} implement \textit{strtok\_s()} but not \textit{strtok()}?
+            
+        \end{itemize}
+
+        \item system calls
+            \begin{itemize}
+                \item Describe how handles are associated with files, processes or threads. Are handles unique within the entire OS or just within a single process?
+                
+                \item Describe your code for reading and writing user data from the kernel.
+                
+                \item Suppose a system call causes a full page (4,096 bytes) of data to be copied from user space into the kernel. What is the least and the greatest possible number of inspections of the page table (e.g. calls to \textit{\_VmIsKernelAddress()}) that might result? What about for a system call that only copies 2 bytes of data? Is there room for improvement in these numbers, and how much?
+                
+                \item Briefly describe your implementation of the ``SyscallProcessWaitForTermination'' system call and how it interacts with process termination.
+                
+                \item Any access to user program memory at a user-specified address can fail due to a bad pointer value.  Such accesses must cause the system call to fail.  System calls are fraught with such accesses, e.g. a ``SyscallFileRead'' system call requires reading the function's four arguments from the user stack then writing an arbitrary amount of user memory, and any of these can fail at any point.  This poses a design and error-handling problem: how do you best avoid obscuring the primary function of code in a morass of error-handling?  Furthermore, when an error is detected, how do you ensure that all temporarily allocated resources (locks, buffers, etc.) are freed?  In a few paragraphs, describe the strategy or strategies you adopted for managing these issues. Give an example.
+                
+                
+                \item Consider parent process P with child process C. How do you ensure proper synchronization and avoid race conditions when P calls SyscallProcessWaitForTermination(C) before C exits?  After C exits? How do you ensure that all resources are freed in each case? How about when P terminates without waiting, before C exits? After C exits? Are there any special cases?
+
+            \end{itemize}
+
+\end{enumerate}
+
+
+\subsection{Explanation of Your Design Decisions}
+
+
+
+% ================================================================================= %
+\section{Tests}
+
+
+
+% ================================================================================= %
+\section{Observations}
+
+
+

@@ -1,0 +1,7 @@
+[TEST]Will create 1 threads for running test [TestThreadPriorityDonationOnce]
+[TEST]Donator thread with priority 31 will attempt to take mutex!
+[TEST]
+[PASS]
+[TEST]Donator thread with priority 31 acquired mutex!
+[TEST]Donator thread with priority 31 released mutex!
+[TEST]Thread [TestThreadPriorityDonationOnce-00] terminated with status: 0x0

@@ -1,0 +1,6 @@
+[ProcessWaitNormal.exe]:[Successfully validated the interface!]
+[dummy.exe]:[Successfully validated the interface!]
+[dummy.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
+[dummyf~1.exe]:[Successfully validated the interface!]
+[dummyf~1.exe]:[Returned from main function, will call ThreadExit with status 0xE8000003!]
+[ProcessWaitNormal.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

@@ -1,0 +1,404 @@
+\chapter{Project 2: Userprog}
+
+\section{Overview}
+
+In the first project you worked with the threading system, interacted a little with the timer
+interrupt code and did some inter-processor communication. For the second project you will work on
+the user-mode kernel interface system and implement several system calls (syscalls) which will
+allow user applications to do useful work.
+
+Currently, \projectname supports loading user-applications without passing any arguments. In this
+project you will add support for passing arguments to user applications.
+
+While in the first project you only worked with kernel data and you didn't have to validate all the
+input received in the functions you've written or modified because you trusted the kernel in this
+project you will receive data from user-mode applications which must \textbf{NOT} be trusted.
+
+There MUST be a clear separation between trusted code (which runs in kernel mode) and untrusted code
+(running in user-mode). It is not OK for the operating system to crash if a badly written
+application wants the OS to read the contents of a file to an invalid address (a NULL pointer for
+example).
+
+Put shortly, these are your 3 main objectives for this project: implementing system calls, passing
+program arguments to loaded applications and validating all user-input not allowing it to crash the
+OS.
+
+The VS configuration used for compiling the code must be \textbf{Userprog}. The only difference
+between configuration are the tests which run when building the RunTests project.
+
+\subsection{Userprog Initialization}
+
+While the initialization of the threading system was complicated initializing support for system
+calls is straightforward. The only function involved in this is \func{SyscallCpuInit} which is
+called on each CPU.
+
+This function is responsible for setting up a few CPU registers (called MSRs) which define the kernel
+entry point of system calls and the RFLAGS (and implicitly the interruptibility) to be used when a 
+system call is invoked. For more information you can look-up the SYSCALL and SYSRET instructions in
+\cite{intelInstr} and the IA32\_LSTAR, IA32\_FMASK and IA32\_STAR MSRs in \cite{intelSys} Chapter 35
+ - Model-Specific Registers (MSRs).
+
+The kernel entry point is \func{SyscallEntry} defined in \file{\_syscall.yasm}. This function is 
+responsible for switching to the kernel stack, for saving the user register state, for calling the C
+ \func{SyscallHandler} function. In its current implementation the function only retrieves the
+syscall number, logs it and sets a STATUS\_NOT\_IMPLEMENTED error code in the user-mode RAX register
+which holds the status of the system call and will be the result seen by the user code. This is the
+function where most of your work will be done.
+
+Once control is returned to \func{SyscallEntry} it will restore the initial register state, restore
+the user-mode stack and place the calling instruction pointer in the RCX register and return to user
+land through the SYSRET instruction.
+
+\subsection{Issuing system calls}
+
+The user-mode code which issues system calls is also called \func{SyscallEntry} and it is also
+defined in a file called \file{\_syscall.yasm}, however these are separate files and functions.
+While the kernel side functions belonged to the HAL9000 project we can find their user land
+counterparts in the UsermodeLibrary project.
+
+This function places all the parameters on the stack and points the RBP register to point to the
+start of the parameters. The system call number is also placed in the R8 register and the SYSCALL
+instruction is executed to perform the switch to kernel mode.
+
+Upon return the RAX register will hold the status of the system call.
+
+\textbf{NOTE: You don't have to modify these assembly functions or call them directly. When issuing
+system calls you should use the functions defined in the \file{syscall\_if.c}.} For a description
+of their parametrization and usage see \file{syscall\_func.h} - this file is shared by both the
+kernel and user applications. These are the functions you will need to implemented on the kernel
+side.
+
+\subsection{Working with user applications}
+
+\subsubsection{Copying an application to \projectname's filesystem}
+
+All the user-mode applications can be found in the \textit{User-mode -> Applications} VS filter.
+However, it is not enough to simply compile an application for it to be seen by \projectname. It
+must be copied to its file system, this can be done automatically by running the CopyUmAppsToVm
+VS project (\textit{User-mode -> Utils} VS filter).
+
+This project must be built while the HAL9000 VM is powered off, else it won't be able to mount the
+file system and copy the application files.
+
+\subsubsection{Loading an application}
+\label{sect:AppLoad}
+
+\projectname has a very basic portable executable (PE - \cite{msdnPE}) parser and loader. Each
+application written for \projectname must statically link the UsermodeLibrary library file which 
+will provide the application's entry point (both for the main and for secondary threads).
+
+You can see the entry point function for the main thread \func{\_\_start} in \file{um\_lib.c} - this
+is the place where the common library and system call interface will be initialized. Once this is
+done the actual entry point of the application is called through the \func{\_\_main} function.
+
+Besides the two extra underlines this is similar to a classic C main function where the parameters
+received are the program arguments (argc and argv).
+
+The entry point for secondary threads is \func{\_\_start\_thread} - this function is implemented in
+\file{um\_lib\_helper.c}.
+
+These user-mode application projects must be configured in a special way so \projectname will be
+able to load them. We have provided two VS templates so you can easily add new user applications to
+the solution: \file{HAL9000\_UserApplication.zip} and \file{HAL9000\_UserMain.zip}: the first one is
+a project template, while the second file is a file template (you should use it when adding the
+main.c file).
+
+For VS to recognize these templates you need to place the project template in \file{My Documents/Visual
+Studio 2015/Templates/ProjectTemplates} and the item template in \file{My Documents/Visual
+Studio 2015/Templates/ItemTemplates}.
+
+\subsubsection{Virtual Memory Layout}
+\label{sect:VirtMemLayout}
+
+The VA range [0xFFFF'8000'0000'0000, 0xFFFF'FFFF'FFFF'FFFF] is mapped in kernel mode, while the
+VA range [0x0000'0000'0000'0000', 0x0000'7FFF'FFFF'FFFF] belongs to user-space.
+
+In case you're wondering why there's such a huge gap between the two address spaces this is due to a
+restriction in the x86 CPU architecture which require the value of the 47th bit to be reflected in
+bits 63-48, addresses which respect this property are called canonical address. The CPU will
+generate a \#GP exception when accessing memory using non-canonical addresses.
+
+For more information on the organization of the kernel VA space you can see the comments above
+\func{MmuInitSystem}.
+
+In case of user-mode processes they are loaded at their preferred base address (you can see this by
+going to the Project's properties in VS then \textit{Linker -> Advanced -> Base Address}. Currently,
+all \projectname user-applications have the preferred base address set to 0x1'4000'0000 however this
+is not mandatory - \projectname should be able to load the application anywhere in user-land memory.
+
+The virtual memory managed by the VMM will then start at the image base +
+\macro{VA\_ALLOCATIONS\_START\_OFFSET\_FROM\_IMAGE\_BASE}
+(currently defined as 1GB). As a result both the stack and heap allocations will have addresses over
+0x1'8000'0000.
+
+\subsubsection{Accessing user memory}
+
+As part of a system call, the kernel must often access memory through pointers provided by a user
+program. The kernel must be very careful about doing so, because the user can pass a null pointer,
+a pointer to unmapped virtual memory, a pointer to a user address to which it does not have the
+proper access rights (e.g: the pointer may be to a read-only area and the system call would write to
+that region), or a pointer to kernel virtual address space. All of these types of invalid pointers
+must be rejected without harm to the kernel or other running processes, by failing the system call.
+
+\textbf{NOTE: For this project we only consider issues which arise from single-thread user
+applications, in case of multi-threaded applications things get more complicated: a valid user-mode
+address may become invalid because it is freed by a different thread than the one which issues the
+system call.}
+
+There are at least two reasonable ways to access user memory correctly. The first method is to
+verify the validity of a user-provided pointer, then dereference it. If you choose this route, 
+you'll want to look at \func{MmuIsBufferValid}. This is the simplest way to handle user memory
+access.
+
+The second method is to check only that a user specified pointer doesn't have the 
+\textit{VA\_HIGHEST\_VALID\_BIT} bit set (see \func{\_VmIsKernelAddress} and
+\func{\_VmIsKernelRange}), then dereference it.
+An invalid user pointer will cause a "page fault" that you can handle by modifying the code in
+\func{VmmSolvePageFault}. This technique is normally faster because it takes advantage of the
+processor's MMU, so it tends to be used in real kernels.
+
+In either case, you need to make sure not to "leak" resources. For example, suppose that your system
+call has acquired a lock or allocated memory. If you encounter an invalid user pointer afterward,
+you must still be sure to release the lock or free the page of memory. If you choose to verify user
+pointers before dereferencing them, this should be straightforward. It’s more difficult to handle
+if an invalid pointer causes a page fault, because there’s no way to return an error code from a
+memory access.
+
+\textbf{NOTE: A safer, but slower solution would be to map the physical pages described by the user
+addresses into kernel space. This way you would not be bothered if the user application un-maps its
+VA to PA translations as long as it is not able to free the physical pages. Also, this would allow
+the SMAP (Supervisor Mode Access Prevention) CPU feature to be activated causing page faults on
+kernel accesses to user memory thus ensuring the OS doesn't access user-memory by mistake.}
+
+\section{Assignment}
+
+\subsection{Argument Passing}
+
+If you haven't done so yet, you should read the \fullref{sect:AppLoad} now. You will need to work in
+\func{\_ThreadSetupMainThreadUserStack} to setup the user-mode stack of the application's main
+thread of execution.
+
+You already have the command line and the number of arguments available in the \var{FullCommandLine}
+and \var{NumberOfArguments} fields of the PROCESS structure (see \file{process\_internal.h} and
+\fullref{sect:Processes} for more details).
+
+All you need to do is is place the arguments on the user stack and return the resulting stack
+pointer in the \var{ResultingStack} output parameter. For more information about program loading
+read \fullref{sect:ProgramStart}. We recommended you use \func{strchr} available in \file{string.h}
+for parsing the command arguments.
+
+\subsection{User memory access}
+
+As previously state, you need to be on the lookout for the following violations when accessing
+pointers received as parameters in system calls:
+\begin{enumerate}
+	\item Accessing a NULL pointer.
+	\item Accessing an un-mapped user address.
+	\item Accessing a user address which does not have enough rights to perform the action required.
+Example: if an address is read-only and the system call would put data in the buffer it should not
+do so.
+	\item Accessing a kernel-mode virtual address.
+\end{enumerate}
+
+\textbf{NOTE: All these conditions must be validated for the whole length of the buffer and not only
+for its start or end position, i.e. address 0x4000 and 0x6000 may be a valid addresses but 0x5000
+may not.}
+
+All of these conditions are checked in the test suite.
+
+\subsection{System calls}
+
+Implement the system call handler in \func{SyscallHandler}. The only parameter received by this
+function is a pointer to the state of the user applications registers at the moment of the system
+call. You will find the system call number in the R8 register, a pointer to the parameters in RBP
+and you must place the result of the system call in the RAX register to return the status of the
+system call to the user application.
+
+Your goal is to implement all the system calls defined and described in \file{syscall\_func.h}. As
+you can see all the system calls return a STATUS (this is the value of the RAX register).
+
+To implement syscalls, you need to provide ways to read and write data in user virtual
+address space.
+
+Also, you may be wondering what's up with the \textit{UM\_HANDLE} data type: the idea is that when
+an application opens a file or creates a new thread or process it needs a way of later referring to
+that created object, i.e. it's useless to open a file if it cannot later be used for reading or
+writing data to it. That's where handles come in, each time a user executes a system call which has
+the effect of creating or opening an object (file/thread/process) a \textit{UM\_HANDLE} will be
+returned to it.
+
+This handle will later be used by the system calls which manipulate that class of objects, for files
+it would be \func{SyscallFileRead}, \func{SyscallFileWrite} and \func{SyscallFileClose}.
+
+NOTE: While the easy solution might seem to simply return kernel pointers as handles this is
+ not a good design choice and the implementation isn't so straightforward either.
+
+The reason it is not so straightforward is that in your system call implementation we require you to
+validate all handles: this means, beside validating that the handle is valid and was created for
+this process, you should also validate that the handle is of the appropriate type, i.e. you wouldn't
+want to be working with a thread handle when reading the contents of a file or you wouldn't want
+process B to be able to access the files opened by process A.
+
+Another reason reason it is a bad design decision is that this effectively introduces an
+information disclosure vulnerability into the kernel - 
+\href{https://cwe.mitre.org/data/definitions/200.html}{CWE-200 Information Exposure}, i.e. any user-
+application can start mapping the kernel environment by having access to information it should
+not know.
+
+When you're done with this part and with \fullref{sect:UserExceptions}, \projectname should be
+bulletproof. Nothing that a user program can do should ever cause the OS to crash, panic, fail an
+assertion, or otherwise malfunction. It is important to emphasize this point: our tests will try to
+break your system calls in many, many ways. You need to think of all the corner cases and handle
+them.
+
+If a system call is passed an invalid argument, the only acceptable option is to return an error
+value.
+
+\subsubsection{File Paths}
+
+\func{SyscallFileCreate} and \func{SyscallProcessCreate} both receive a file path as one of their
+parameters. This may be an absolute path, starting from drive letter and specifying the full path
+to the file (an example would be "D:\textbackslash Folder\textbackslash File.txt") or it may be a
+relative path in which case the handling differs for these system calls:
+\begin{itemize}
+	\item In the case of \func{SyscallFileCreate} the final path is considered to be relative to the
+system drive, i.e. if "Test.ini" is the path given to the syscall, internally it will try to open
+"\%SYSTEMDRIVE\%\textbackslash Test.ini".
+
+	\item In the case of \func{SyscallProcesCreate} the final path is considered relative to the
+applications folder found on the system drive, i.e. if "Apps.exe" is the path given to the syscall,
+internally it will try to open "\%SYSTEMDRIVE\%\textbackslash APPLIC\textasciitilde 1\textbackslash Apps.exe".
+\end{itemize}
+
+NOTE: You can use \func{IomuGetSystemPartitionPath} to retrieve the system drive.
+
+\subsection{Handling user-mode exceptions}
+\label{sect:UserExceptions}
+
+Besides the invalid pointer de-references you could encounter while accessing user memory in your
+system call implementation you also need to protect the OS from the exceptions caused directly by
+the running user-code.
+
+User applications are free to use any assembly instructions they want and as a result they could try
+to access registers which they are not to allowed to access (control registers, MSRs, IO ports and
+so on) or these applications may suffer code errors leading to a division by zero exception.
+
+Besides valid page faults caused by the lazy mapping mechanism, regardless of the user exception you
+need to terminate the application. You need to think of a generic way to do this and you should not
+care about the exception which caused the crash.
+
+\section{Source Files}
+
+For this project most of your work will be done in the \textit{usermode} and \textit{executive}
+filters. Here's a quick overview of the files you'll be interested in:
+
+\file{thread.c}
+
+You will have to implement parameter passing so you'll need to modify \func{\_ThreadSetupMainThreadUserStack}
+ to properly setup the main thread's stack.
+
+\file{process.h}
+
+\file{process\_defs.h}
+
+These are the public process definitions - these functions may be used by any external components
+such as drivers and the syscall interface
+
+\file{process\_internal.h}
+
+Defines the PROCESS data structure and the functions which should only be called by internal OS
+components which manage processes. Some examples include the functions for adding or removing a
+thread from a process and the function to switch the CR3 to the new process’s paging structures.
+
+\file{process.c}
+
+Contains the implementation exposed in all process* headers. For more information see
+\fullref{sect:Processes}. You will probably need to implement a per process handle tracking
+mechanism here.
+
+\file{um\_application.h}
+
+\file{um\_application.c}
+
+Contains the implementation for reading the user application from disk and loading it into memory.
+You will NOT work in these files.
+
+\file{syscall.h}
+
+\file{syscall.c}
+
+Provides the function to initialize the system call dispatching system, \func{SyscallCpuInit}, and
+the system call handler: \func{SyscallHandler}. Most of your work will be done in this file.
+
+\file{syscall\_defs.h}
+
+\file{syscall\_func.h}
+
+\file{syscall\_no.h}
+
+These are files which are shared between the kernel and user-mode components. These define the
+system call numbers, the system call interface functions and define basic types used by system
+calls such as handles, paging rights and so on.
+
+\file{io.h}
+
+Provides functions to work with devices, when implementing the file system system calls you will be
+interested in \func{IoCreateFile}, \func{IoCloseFile}, \func{IoReadFile} and \func{IoWriteFile}.
+
+\section{FAQ}
+
+\textbf{Q: How much code will I need to write?}
+
+A: Here’s a summary of our reference solution, produced by the hg  diff program. The final row gives
+total lines inserted and deleted; a changed line counts as both an insertion and a deletion.
+
+The reference solution represents just one possible solution. Many other solutions are also possible
+and many of those differ greatly from the reference solution. Some excellent solutions may not
+modify all the files modified by the reference solution, and some may modify files not modified by
+the reference solution.
+
+%\begin{figure}
+\begin{verbatim}
+src/HAL9000/HAL9000.vcxproj             |    5 +
+src/HAL9000/HAL9000.vcxproj.filters     |   15 +
+src/HAL9000/headers/process_internal.h  |    3 +
+src/HAL9000/headers/syscall_struct.h    |   67 +++++++
+src/HAL9000/headers/um_handle_manager.h |   46 +++++
+src/HAL9000/src/isr.c                   |    9 +-
+src/HAL9000/src/process.c               |    8 +
+src/HAL9000/src/syscall.c               |  636 ++++++++++++++++++++++++++++++++++++-
+src/HAL9000/src/syscall_func.c          |  541 ++++++++++++++++++++++++++++++++++++
+src/HAL9000/src/thread.c                |   81 ++++++++-
+src/HAL9000/src/um_handle_manager.c     |  248 +++++++++++++++++++++++++++
+src/shared/common/syscall_defs.h        |    2 +
+src/shared/kernel/heap_tags.h           |    3 +-
+13 files changed, 1658 insertions(+), 6 deletions(-)
+\end{verbatim}
+
+\newline
+
+\textbf{Q: Any user application run crashes the system with a \#PF exception}
+
+A: The first thing you have to do is make sure the stack is properly set up before any user
+application is run. You don't have to implement argument passing from the beginning, however you
+should at least reserve space on the stack for the shadow space and the return address.
+
+\newline
+
+\textbf{Q: \projectname asserts with any application}
+
+A: You'll have to implement the \func{SyscallValidateInterface} system call before any system call
+is possible. The assert is caused by the fact that the process generated a \#GP in case communication
+through system calls is not possible.
+
+\newline
+
+\textbf{Q: Can I set a maximum number of open handles per process?}
+
+A: No.
+
+\newline
+
+\textbf{Q: Do I have to do any changes in user-mode code?}
+
+A: No.

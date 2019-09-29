@@ -1,0 +1,4 @@
+[TEST]Will create 1 threads for running test [TestThreadTimerPeriodicOnce]
+[TEST]
+[PASS]
+[TEST]Thread [TestThreadTimerPeriodicOnce-00] terminated with status: 0x0

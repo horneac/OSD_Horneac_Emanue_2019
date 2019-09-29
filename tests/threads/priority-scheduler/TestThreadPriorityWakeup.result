@@ -1,0 +1,33 @@
+[TEST]Will create 16 threads for running test [TestThreadPriorityWakeup]
+[TEST]Thread [TestThreadPriorityWakeup-0F] with priority 15 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-0E] with priority 14 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-0D] with priority 13 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-0C] with priority 12 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-0B] with priority 11 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-0A] with priority 10 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-09] with priority 9 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-08] with priority 8 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-07] with priority 7 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-06] with priority 6 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-05] with priority 5 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-04] with priority 4 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-03] with priority 3 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-02] with priority 2 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-01] with priority 1 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-00] with priority 0 woke up!
+[TEST]Thread [TestThreadPriorityWakeup-00] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-01] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-02] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-03] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-04] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-05] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-06] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-07] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-08] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-09] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0A] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0B] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0C] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0D] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0E] terminated with status: 0x0
+[TEST]Thread [TestThreadPriorityWakeup-0F] terminated with status: 0x0

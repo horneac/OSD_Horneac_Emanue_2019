@@ -1,0 +1,4 @@
+[ThreadWaitTerminated.exe]:[Successfully validated the interface!]
+[ThreadWaitTerminated.exe]:[Hello from secondary thread!]
+[ThreadWaitTerminated.exe]:[Secondary thread has finished execution!]
+[ThreadWaitTerminated.exe]:[Returned from main function, will call ThreadExit with status 0x0!]

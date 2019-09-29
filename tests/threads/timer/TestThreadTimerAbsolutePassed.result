@@ -1,0 +1,4 @@
+[TEST]Will create 1 threads for running test [TestThreadTimerAbsolutePassed]
+[TEST]
+[PASS]
+[TEST]Thread [TestThreadTimerAbsolutePassed-00] terminated with status: 0x0

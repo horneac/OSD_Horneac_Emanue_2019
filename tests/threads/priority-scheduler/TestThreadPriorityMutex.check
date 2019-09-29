@@ -1,0 +1,28 @@
+use strict;
+use warnings;
+
+#suppress smartmatch warnings
+no if $] >= 5.017011, warnings => 'experimental::smartmatch';
+
+# a.k.a. main
+die "Usage $0 PATH_TO_RESULT_FILE\n" if @ARGV < 1;
+
+local $/;
+
+my $failure = 0;
+
+open(my $fh, '<', $ARGV[0]) or die sprintf("Could not open file %s", $ARGV[0]);
+
+my $data = <$fh>;
+
+close $fh;
+
+my @capturedData = $data =~ /Thread \[.*\] with priority (\d+)/gi;
+
+my @sortedArr = sort { $b <=> $a } @capturedData;
+
+$failure = not (@sortedArr  ~~ @capturedData);
+
+print "[FAIL] Priorities should appear in non-decreasing order!\n" if $failure;
+
+exit $failure;

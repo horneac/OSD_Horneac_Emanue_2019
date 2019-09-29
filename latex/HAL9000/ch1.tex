@@ -1,0 +1,418 @@
+\chapter{Introduction}
+\label{chap:Introduction}
+
+\projectname is a 64-bit operating system (OS) written for x86 symmetric multiprocessor systems
+(SMP). It provides a simple round robin scheduler for scheduling threads on the available CPUs,
+support for launching user-mode applications, a basic FAT32 file-system driver and basic drivers for
+providing I/O operations (VGA, IDE disk, keyboard, legacy COM and ethernet).
+
+\projectname can theoretically run on any physical Intel x86 PC which supports 64-bit operating 
+mode. However, because it is cheaper, easier and safer to test in a virtual environment we will use
+VMWare Workstation \cite{vmware} for running our OS.
+
+The project is a semester long and consists of improving the threading and user-mode support
+currently available in \projectname.
+
+This chapter provides the basic introduction to the project, highlights the differences between this
+project and a very popular one (Pintos \cite{pintos}) which served as an inspiration for the 
+conception of \projectname. Afterward, this section provides the basic pointers to navigating,
+building, running and testing the code.
+
+\section{Versus Pintos}
+
+\projectname started as the author's project during his first graduate year and as it evolved the
+author started thinking it could maybe replace Pintos  as the OS used for teaching
+students operating system concepts.
+
+The arguments made in favor of using \projectname instead of Pintos are the following:
+\begin{itemize}
+	\item Support for multi-processor systems. This provides true concurrency and makes
+synchronization a bit harder (you can't just disable interrupts) and provides an environment more
+authentic to the real world. For more information on these differences see \fullref{sect:MultiCore}.
+
+	\item 64-bit execution mode. Several benefits are gained by the OS by
+running in 64 bit mode (we will refer to this as long mode from now on): some of these benefits are
+performance wise: PCIDs, syscall/sysret instruction pair while some enhance security: XD, larger
+virtual address spaces and protection keys. For more details, see \fullref{sect:Why64}.
+
+	\item The OS image is multiboot compliant \cite{gnuMultiboot}, this means it can be loaded by
+any multiboot loader such as grub or PXE. This makes it easy to run the OS through both hard-disk
+boot and network boot.
+
+	\item Code is annotated using an annotation language to provide better compile-time checks and
+detect errors earlier. Besides improving code quality by detecting checks earlier, annotating code
+teaches students to better think of their design before starting to write functions by forcing them
+to annotate the function header before one line of the body is written. See \cite{msdnSAL} for more
+ information about the annotation language used.
+
+	\item If people are not interested strictly in OS design, but want to write their own file
+system, network or disk driver they could easily extend this OS to support any file system, network
+adapter or disk controller interface.
+
+\end{itemize}
+
+The arguments made in favor of using Pintos instead of \projectname are:
+
+\begin{itemize}
+	\item No debugger support - we have plans to change this in the future. Unfortunately, because
+gdb doesn't know how to interpret pdb files it isn't as simple as adding a basic gdb stub for
+debugger support. \textbf{NOTE: This is on the feature list for the next project iteration.}
+
+	\item Pintos is tried and tested, being part of the curriculum for many top ranked universities
+in the world for many years while \projectname is at its first iteration.
+
+	\item Pintos doesn't rely as many CPU features and doesn't require the host operating system to
+be a 64-bit version.
+
+
+\end{itemize}
+
+Before going any further, we wish to acknowledge Pintos's contribution both as source code
+inspiration and as project requirements definition. Some parts of the Pintos documentation which
+apply to \projectname are taken as is without modification and some are altered.
+
+\section{Project Overview}
+
+\subsection{Root Directory}
+
+The root directory as generated using the install script (see \fullref{sect:SetupBuild}) should look
+like the one illustrated in \fullref{fig:ProjectRoot}.
+
+\begin{figure}
+\begin{verbatim}
+.
+|-- [ dir]  bin
+|-- [ dir]  acpi
+|-- [ dir]  docs
+|-- [ dir]  PXE
+|-- [ dir]  src
+|   |-- [ dir]  Ata
+|   |-- [ dir]  CommonLib
+|   |-- [ dir]  Disk
+|   |-- [ dir]  Eth_82574L
+|   |-- [ dir]  FAT32
+|   |-- [ dir]  HAL
+|   |-- [ dir]  HAL9000
+|   |-- [file]  HAL9000.sln
+|   |-- [file]  HAL9000_WithoutApplications.sln
+|   |-- [ dir]  NetworkPort
+|   |-- [ dir]  NetworkStack
+|   |-- [ dir]  PE_Parser
+|   |-- [ dir]  postbuild
+|   |-- [ dir]  shared
+|   |-- [ dir]  Usermode
+|   |-- [ dir]  Utils
+|   |-- [ dir]  Volume
+|-- [ dir]  temp
+|-- [ dir]  tests
+|-- [ dir]  tools
+|-- [ dir]  VM
+9 directories, 0 files
+\end{verbatim}
+\caption{Project Root Directory}
+\label{fig:ProjectRoot}
+\end{figure}
+
+\begin{itemize}
+	\item bin: this is the place where the binaries are placed after compilation.
+	\item acpi: contains the external acpica library. It is used for parsing the ACPI tables.
+	\item docs: contains this documentation and documentation related to the hardware components or
+external libraries used by \projectname.
+	\item src:
+		\begin{itemize}
+			\item HAL9000.sln: project solution - this is what you need to open with VS.
+			\item HAL9000\_WithoutApplications.sln same as HAL9000.sln except it does not contain
+		the user-mode projects. If you feel that VS is working too slow with the full project try
+		using this.
+			\item postbuild: contains the scripts which write the OS binary to the PXE folder, write
+		the user applications to the VM hard disk and run the tests. You will not run these scripts
+		directly, they are part of VS projects.
+			\item Usermode: contains all the user-mode applications and the common user-mode library.
+			\item Other folders belong to their respective projects, you will only have to work with
+		the HAL9000 project, but we suggest you navigate the project only in VS, see
+		\fullref{sect:SourceTree}.
+		\end{itemize}
+	\item temp: required by VS for storing temporary files - ignore it but do not delete the folder.
+	\item tests: contains the code for parsing the test results and for validating them.
+	\item tools: contains miscellaneous tools including the assembler and the tools required to
+	interact with the VM and its disk.
+	\item VM: contains the two VMs: the one which will boot \projectname and a PXE server.
+	\item PXE: contains the contents required by the PXE server - this folder is shared with the
+	PXE server VM. Upon successful compilation of \projectname its binary is placed here for network
+	boot. \textbf{DO NOT TOUCH THIS FOLDER.}
+\end{itemize}
+
+\subsection{Source Tree Overview}
+\label{sect:SourceTree}
+
+We highly recommend using the Visual Studio (VS) as an IDE and not using notepad++ or other editors
+for navigating the source code. The whole source tree is based on VS filter for grouping files, i.e.
+you will only see a logical separation between files if you open VS - on the file system all the
+files are in the same folder regardless of the component they belong to.
+
+To open the project in VS you need to open the \file{HAL9000.sln} file from the src directory. You
+will see several projects loaded in the VS solution:
+\begin{itemize}
+	\item FAT32
+
+	Provides a basic implementation of a FAT32 file system driver. It lacks the support for long
+file names - uses only 8.3 name format - and does not support writing to the disk. You will not work
+here.
+
+	\item PE\_parser
+
+	Parses portable executable (PE) files, i.e. Windows executables and synthesizes
+information for use by other components. The module is required for re-mapping the kernel and for
+loading user-mode applications into memory. You will not work here.
+
+	\item Eth\_82574L
+
+	Driver for the Intel 82574 GbE Controller Family. The network card emulated by VMWare belongs to
+this family and the driver implements all the required functionality for network reception and
+transmission. You will not work here.
+
+	\item NetworkPort
+
+	Provides helper functions for ethernet drivers. This layer is added so that it is not required
+of each ethernet driver (such as Eth\_82574L) to implement the same functionality over and over
+again. This layer provides helper functions which can be used by any ethernet driver. You will not
+work here.
+
+	\item NetworkStack
+
+	Provides an interface for the operating system to access the network devices. You will not work
+here.
+
+	\item Ata
+
+	Provides the IDE disk controller driver, it is responsible for performing disk I/O by
+communicating with the hard disk controller. You will not work here.
+
+	\item Disk, Volume
+
+	These drivers provide abstraction for the operating system and the attached file systems. A file
+system will be mounted on a volume, while a volume will belong to a disk and the disk will be
+on top of a hard-disk controller. You will not work here.
+
+	NOTE: In real systems the hierarchy can be more complex (a file-system may be on multiple
+volumes and a volume may be on multiple disks, but in \projectname these mappings are one to one).
+
+	\item RemoveAllTests
+
+	When this project is built causes \projectname's next boot not to run any tests and to accept
+user-given commands through the keyboard.
+
+	\item RunTests
+
+	Will start a VM instance of the operating system and will wait until \projectname finishes
+running all the tests or until a timeout occurs (default: 5 minutes). Once execution of the VM
+finishes the results of the tests will be compared with the expected results and a summary of the
+results will be displayed. More details in \fullref{sect:Testing}.
+
+	\item CommonLib
+
+	Contains some basic data structures and functions which would normally be present in the C
+standard library and several other generic constructs which are not coupled with \projectname. Some
+of the features include: string manipulation functions, reference counters, bitmaps, spinlocks,
+support for termination handlers and so on.
+
+	\item HAL
+
+	Provides the layer which works directly with the x86 architecture hardware components (CMOS,
+RTC, IOAPIC, LAPIC, PCI) and processor structures (CPUID, MSR, GDT, IDT, MTRR, TSS).
+
+	\item HAL9000
+
+	The actual operating system code. \textbf{This is the place where all your work will take place}.
+The project contains too many files and too much functionality to describe it all here. On each
+project you will get a more detailed viewed of the components you will work on. You can also browse
+the code at any time to determine what each component does.
+
+\end{itemize}
+
+For more information on how to navigate the solution you can read \fullref{sect:VisualStudio}.
+
+\subsection{Building \projectname}
+
+Before building the project in VS you will first need to configure the \file{paths.cmd} file - this
+is explained in \fullref{sect:SetupBuild}.
+
+Once you have finished configuring the \file{paths.cmd} file you can now build the solution. If you
+want to simply build the OS without starting the VM and running all the tests it is enough to build
+the HAL9000 project.
+
+If you want to go through the whole test cycle rebuild the RunTests project. See more details in
+\fullref{sect:Testing}.
+
+If you want to make sure next time you boot the OS no test will be run rebuild the RemoveAllTests
+project.
+
+\subsection{Running \projectname}
+
+Firstly, you should have both your VMs configured as described in \fullref{sect:SetupBuild}. We will
+refer to the VM on which the PXE server resides as the PXE VM and the VM on which we'll run
+\projectname as the \projectname VM.
+
+You have to start up the PXE VM first and wait for it to boot, you do not have to login because the
+PXE server automatically starts on system boot. Once the first VM is started started, the second VM
+(on which our OS will run) can be launched. Due to its BIOS settings this VM will boot from the
+network and the PXE server will hand it the \projectname binary as the boot image.
+
+Once the PXE VM is up and running you can start the HAL9000 VM by hand from the VMWare Workstation
+interface, or you can build the RunAllTests project to validate your current implementation of one
+of the projects.
+
+If you just want to give some commands by hand once the OS is up you can build the RemoveAllTests
+project and then start the HAL9000 VM from the VMWare Workstation interface.
+
+\section{Grading}
+
+We will grade your assignments based on the design quality and test results, each of which comprises
+50\% of your grade.
+
+\subsection{Design}
+
+We will judge your design based on the design document. We will read your entire design document.
+Don’t forget that design quality, including the design document, is 50\% of your project grade. 
+It is better to spend one or two hours writing a good design document than it is to spend that time
+getting the last 5\% of the points for tests.
+
+\subsubsection{Design Document}
+
+We provide a design document template for each project. For each significant part of a
+project, the template asks questions in four areas:
+
+\begin{itemize}
+	\item \textbf{Data Structures}
+
+Copy here the declaration of each new or changed struct or struct member, global or static variable,
+typedef, or enumeration. Identify the purpose of each in 25 words or less.
+
+The first part is mechanical. Just copy new or modified declarations into the
+design document, to highlight for us the actual changes to data structures. Each
+declaration should include the comment that should accompany it in the source
+code (see below).
+
+We also ask for a very brief description of the purpose of each new or changed
+data structure. The limit of 25 words or less is a guideline intended to save
+your time and avoid duplication with later areas.
+
+	\item \textbf{Algorithms}
+
+This is where you tell us how your code works, through questions that probe your understanding of 
+your code. We might not be able to easily figure it out from the code, because many creative 
+solutions exist for most OS problems. Help us out a little.
+
+Your answers should be at a level below the high level description of requirements given in the 
+assignment. We have read the assignment too, so it is unnecessary to repeat or rephrase what is 
+stated there. On the other hand, your answers should be at a level above the low level of the code
+itself. Don’t give a line-by-line run-down of what your code does. Instead, use your answers to 
+explain how your code works to implement the requirements.
+
+	\item \textbf{Synchronization}
+
+An operating system kernel is a complex, multithreaded program, in which
+synchronizing multiple threads can be difficult. This section asks about how
+you chose to synchronize this particular type of activity.
+
+	\item \textbf{Rationale}
+
+Whereas the other sections primarily ask “what” and “how,” the rationale section concentrates on 
+“why.” This is where we ask you to justify some design decisions, by explaining why the choices you 
+made are better than alternatives. You may be able to state these in terms of time and space 
+complexity, which can be made as rough or informal arguments (formal language or proofs are
+unnecessary).
+
+An incomplete, evasive, or non-responsive design document or one that strays from the template 
+without good reason may be penalized. See \fullref{chap:ProjDoc} for a sample design document for a
+fictitious project.
+
+\end{itemize}
+
+\subsection{Testing}
+\label{sect:Testing}
+
+Your test result grade will be based on our tests. Each project has several tests, testing the
+implementation you provide. To completely test your submission build the RunTests project and wait
+for the results to appear (may take up to 5 minutes). The following are performed when RunTests is
+built:
+\begin{enumerate}
+	\item Parses the contents of the threads or userprog directory from within the tests folder to
+determine which tests must be run, for every test files found in these directories a test will be
+run.
+
+	\item Generates the \file{Tests.module} file and copies it to the PXE location - this file
+contains all the commands that must be executed by the OS to run all the tests previously parsed
+and to shutdown.
+
+	\item Starts the \projectname VM and waits for its termination.
+
+	\item Waits for the VM to terminate or, if it runs for more than 5 minutes, it forcefully shuts
+it down.
+
+	\item The serial log is parsed and divided into .result files having the names of the tests
+executed. As an example: if the OS ran the TestsThreadStart a TestsThreadStart.result file will be
+placed by the already existent TestsThreadStart.test file.
+
+	\item Each .result file is then parsed and a conclusion is drawn by following these steps:
+	
+	\begin{enumerate}
+		\item If an error is logged during execution the test is marked as FAIL.
+		\item If a PASS string is logged during execution the test is marked as PASS.
+		\item If a .check file is present then the perl script within it is run to validate the
+	.result file.
+		\item If none of the previous applied, the  .result file is compared with the corresponding
+		.test file expecting an identical file for passing the test.
+	\end{enumerate}
+
+	\item An .outcome file is generated for each test containing the test conclusion (PASS or FAIL)
+and the lines which caused the conclusion - the reason may be an error logged or a PASS text or the
+lines differing between the .result and .test files.
+
+	\item The result of each test is shown, a summary of the results for each category and the total
+pass / total count are displayed.
+\end{enumerate}
+
+For further details, you can check the \file{execute\_tests.pl} file in the tests folder. If you
+want to run only a single test you can run the \file{run\_single\_test.cmd} script found in the
+src/postbuild folder. The parameters taken by the script are the project name and the test category\textbackslash name.
+As an example, if you would want to run the "TestThreadTimerAbsolute" test you need to run the
+the following command: \textit{run\_single\_test.cmd threads timer\textbackslash TestthreadTimerAbsolute}.
+
+Each test provides feedback only at completion, not during its run, to see the reason why a test
+succeeded or failed see the .outcome file for the test. As an example: if your implementation failed
+the ThreadPriorityMutex test you can open the ThreadPriorityMutex.outcome file in the
+tests/threads/priority-scheduler folder to determine the cause of the FAIL.
+
+All of the tests and related files are in the tests directory. Before we test your submission,
+we will replace the contents of that directory by a pristine, unmodified copy, to ensure that the
+correct tests are used. Thus, you can modify some of the tests if that helps in debugging, but we
+will run the originals.
+
+All software has bugs, so some of our tests may be flawed. If you think a test failure is a bug in
+the test, not a bug in your code, please point it out. We will look at it and fix it if necessary.
+
+Please don’t try to take advantage of our generosity in giving out our test suite. Your code has to
+work properly in the general case, not just for the test cases we supply. For example, it would be
+unacceptable to explicitly base the kernel’s behavior on the name of the running test case. Such
+attempts to side-step the test cases will receive no credit. If you think your solution may be in a
+gray area here, please ask us about it.
+
+\section{Useful documents and links}
+
+\begin{itemize}
+	\item \cite{osdev} - Hobbyist OS development wiki and forum. Contains a lot of tutorials on a large range of topics
+starting from low-level device programming to high level concepts such as scheduling. There is also a forum available
+where you can find additional information on certain topics or ask questions.
+
+	\item \cite{osdever} - Contains a tutorial for developing an operating system from scratch. Some interesting topics
+include memory management, programming interrupts, implementing spinlocks and developing a GUI.
+
+	\item \cite{intelSys} - Intel System Manual: the definitive documentation for everything related to the Intel CPU:
+topics which may help you for the projects are Chapters 4 (Paging), 6 (Interrupt and Exception Handling), 8 (Multiple-Processor
+Management).
+
+	\item \cite{intelInstr} - Intel Instruction Set Reference: if you are interested in the exact effects of an x86
+assembly instruction this is the manual for you.
+
+\end{itemize}

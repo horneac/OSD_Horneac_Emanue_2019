@@ -1,0 +1,49 @@
+[TEST]Will create 16 threads for running test [TestThreadTimerMultipleThreads]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]
+[PASS]
+[TEST]Thread [TestThreadTimerMultipleThreads-00] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-01] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-02] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-03] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-04] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-05] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-06] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-07] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-08] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-09] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0A] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0B] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0C] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0D] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0E] terminated with status: 0x0
+[TEST]Thread [TestThreadTimerMultipleThreads-0F] terminated with status: 0x0

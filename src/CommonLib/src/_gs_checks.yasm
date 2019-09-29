@@ -1,0 +1,28 @@
+%ifdef CL_NO_RUNTIME_CHECKS
+
+%else
+global __security_check_cookie
+
+extern __report_cookie_corruption
+extern __security_cookie
+
+[BITS 64]
+align 0x10, db 0
+__security_check_cookie:
+    ; store rax
+    mov             r11, rax
+    mov             rax, [QWORD __security_cookie]
+
+    cmp             rcx, rax
+
+    je              .end
+
+    jmp             __report_cookie_corruption
+
+    ; we should not return
+    int 3
+
+.end:
+    mov             rax, r11
+    ret
+%endif ; CL_NO_RUNTIME_CHECKS

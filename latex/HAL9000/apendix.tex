@@ -1,0 +1,3385 @@
+\begin{appendices}
+
+\chapter{Reference Guide}
+
+\section{HAL9000}
+
+\subsection{Startup}
+\label{sect:OsStart}
+
+\projectname is a multiboot compliant OS, as a result it expects to be loaded at the physical
+address specified in the multiboot header in 32-bit operating mode with paging disabled.
+
+This section will detail the execution path starting from the assembly code which runs after the
+multiboot loader gives us the control to the C code which initializes each component.
+
+\subsubsection{Assembly code}
+
+Code execution begins in the \func{\_\_EntryMultiboot} function defined in \file{\_mboot32.yasm}. As
+stated earlier, we will not continue execution if we were not loaded by a multiboot loader.
+
+The physical memory map describing the physical memory available in the system is retrieved using
+the INT 15H E820H BIOS interrupt function. The list of potential COM ports are retrieved from the
+bios data area.
+
+After this information is acquired the OS will transition to operating in 64 bits where it will
+forever remain. After this transition occurs in \func{PM32\_to\_PM64} in \file{\_transition.yasm}
+the assembly code will give the control to the first C function: \func{Entry64}.
+
+\subsubsection{C code}
+
+\func{Entry64} starts by initializing the commonlib library(providing primitive synchronization
+ mechanisms, asserts and other utility functions).
+
+Control then reaches \func{SystemInit} which validates we are capable of executing on the CPU we are
+currently running (\func{CpuMuValidateConfiguration}). Serial communication is initialized if there
+was a valid COM port in bios data area.
+
+The IDT is setup (\func{InitIdtHandlers}) and exceptions will no longer cause triple faults. Most
+exceptions will not be handled but log messages will be generated which help debug the issue. In
+contrast, the page fault \#PF exception is one which occurs very often and it will be handled mostly
+successfully - see \cite{intelSys} Chapter 6 - Interrupt and Exception Handling and
+\fullref{sect:InterruptHandling} for details.
+
+The next things to initialize are the memory managers (\func{MmuInitSystem}):
+\begin{itemize}
+	\item The physical memory manager - \func{PmmInitSystem} - responsible for allocating physical
+frames of memory on request. On initialization it processes the E820H memory map to determine how
+much physical memory the system has and to reserve the already used memory regions.
+	\item The virtual memory manager - \func{VmmInit} - responsible for allocating virtual addresses
+and for mapping virtual addresses (VAs) to physical addresses (PAs). It is also responsible for
+handling \#PFs.
+	\item The heap - \func{\_MmuInitializeHeap} - the heap is responsible for managing large
+continuous area of virtual space and for offering the possibility for other components to allocate
+memory at a byte level granularity from these regions managed. 
+\end{itemize}
+
+\func{MmuInitSystem} will also create a new paging structure hierarchy and will cause a CR3 switch
+to these new structures.
+
+Next, if the multiboot loader passed any boot modules to us they will be loaded in memory by
+\func{BootModulesInit}. The \file{Tests.module} file describing the tests to run is such a module.
+
+The ACPI tables will be parsed by \func{AcpiInterfaceInit} to determine the processors present on
+the system and to determine if PCI express support is available.
+
+\func{CpuMuAllocAndInitCpu} will then be called to allocate the CPU structure for the bootstrap
+processor (BSP - the processor on which the system execution starts) and to validate that the CPU
+is compatible with \projectname.
+
+This function will activate the CPU features required for operation and those for enhancing the
+operating system's capabilities. Also, the main thread is created here.
+
+\func{IomuInitSystem} is then called to initialize the I/O capabilities of the system by
+initializing the following:
+\begin{itemize}
+	\item the IOAPIC: this is the system interrupt controller which superseded the PIC and is
+responsible for interrupt delivery for legacy devices and for PCI devices which do not have
+support for directly delivering interrupts through MSI or MSI-X.
+
+	\item the IDT handlers, for the second time - first time there were no TSS stacks allocated for
+the current CPU and now there are. The reason to use TSS stacks is to prevent interrupt handlers
+from using an invalid or corrupt stack. More information can be found in \cite{intelSys}
+Chapter 6 - Interrupt and Exception Handling.
+
+	\item the PCI hierarchy, all PCI devices must be retrieved and placed in a device hierarchy so
+proper interrupt routing can be done.
+
+	\item the clocks: RTC - used to update the clock found in the top right-hand corner of the
+display and the PIT - programmed to deliver the scheduler clock tick.
+
+	\item the keyboard: used for receiving commands from the user operator.
+\end{itemize}
+
+\func{SmpSetupLowerMemory} will then setup the required memory structures for all the other CPUs to
+start up - these are called Application Processors (APs).
+
+\func{ProcessSystemInitSystemProcess} will then create the "System" process and attribute the only
+running thread to it.
+
+\func{ThreadSystemInitIdleForCurrentCPU} will spawn the idle thread and will enable interrupt
+delivery.
+
+The ACPI tables are parsed again through the \func{AcpiInterfaceLateInit} function for additional
+information: the PCI routing tables which describe which entries of the IOAPIC are used by which
+devices. This step is required for proper interrupt setup for PCI devices without MSI/MSI-x
+capabilities.
+
+All the APs will now be woken up by the \func{SmpWakeupAps} function. This function returns only
+after all the processors have woken up - for more details see \fullref{sect:ApInit}. Once this
+function returns the main thread of execution - which initially ran on the BSP - may be moved on
+any of the other CPUs.
+
+After the APs have all woken up all interrupts registered for devices are enabled: keyboard and
+clocks.
+
+The \func{IomuInitDrivers} function is then called to initialize each driver found in the
+\var{DRIVER\_NAMES} list. These are the drivers responsible for managing the disk controller, the
+abstract disk and volume concepts, the FAT32 file system and the ethernet network card.
+
+Afterward, the \func{CmdRun} function is executed which executes all the commands received in all
+the boot modules (currently only the "Tests" module) and then allows the user to issue hand-written
+commands.
+
+If the /shutdown command is given the system shuts down. To reboot the system you can use the /reset
+command.
+
+\subsubsection{AP initialization}
+\label{sect:ApInit}
+
+The APs start execution in 16 bits in the \func{TrampolineStart} function found in the
+\file{\_trampoline.yasm} assembly file. The assembly code is responsible for transitioning from
+real-mode in 16 bits to protected mode in 32 bits and then to long mode with paging enabled. Once
+these transitions have been made the \func{ApInitCpu} C function is called.
+
+Within this function the GDT and IDT are reloaded with their high-memory counterparts, the current
+CPU structure is initialized thus starting the main thread of execution on the AP and signaling the
+BSP that it has woken up. The idle thread is then initialized for the AP and the main thread exits
+successfully by calling the \func{ThreadExit} function.
+
+\subsection{Multi-core vs Single-core}
+\label{sect:MultiCore}
+
+\projectname has support  for multi-processor ssytems - what this means is that despite the fact 
+that the OS starts execution on a single processor (the BSP) it detects any additional CPUs found in
+the system, initializes them and begins executing code on them as well.
+
+Due to this fact true code concurrency is achieved, i.e. code can actually be executed at the same
+time on two or more processors. This cannot be said for single-core systems because only one thread
+may be executing at any time on a CPU - the concurrency available on single-core systems is due to
+the fact that while a thread is executing a function it may be interrupted and another thread may
+be scheduled to execute in its place and it may execute the same code - but it is not executing at
+the same time.
+
+On the other hand, on multi processor systems there are as many threads executing as many processor
+cores are in the system, due to this fact more threads may execute the same code at the same time.
+
+From these statements we can derive that synchronization on single-core systems is as simple as
+turning off interrupts in critical regions - thus making it impossible for the executing thread to
+be preempted. While this is a bad habit for single-core systems it is useless for multi-core systems.
+
+When interrupts are disabled, they guarantee that the current thread is not preempted, but that
+doesn't stop threads executing on other processors from executing code in the same critical region.
+For a further discussion on the synchronization mechanisms used in \projectname see
+\fullref{sect:Synch}.
+
+To communicate between CPUs an architectural mechanism is provided through Inter Processor
+Interrupts (IPIs). Any CPU can send an interrupt to himself, any other CPU, any group of CPUs or
+to all the CPUs in the system.
+
+\projectname provides a mechanism for sending such messages to other CPUs through the
+\func{SmpSendGenericIpi} and \func{SmpSendGenericIpiEx} as shown in \fullref{lst:SmpIpi}.
+
+\begin{lstlisting}[caption={IPI functions},label={lst:SmpIpi}]
+// Calls SmpSendGenericIpiEx with SmpIpiSendToAllExcludingSelf causing the
+// BroadcastFunction to be executed on each CPU except the one that is calling
+// the function.
+STATUS
+SmpSendGenericIpi(
+    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
+    IN_OPT  PVOID                   Context,
+    IN_OPT  PFUNC_FreeFunction      FreeFunction,
+    IN_OPT  PVOID                   FreeContext,
+    IN      BOOLEAN                 WaitForHandling
+    );
+
+//******************************************************************************
+// Function:     SmpSendGenericIpiEx
+// Description:  The current CPU sends an IPI to the processors specified by
+//               SendMode and Destination to execute the BroadcastFunction.
+// Returns:      STATUS
+// Parameter:    IN PFUNC_IpcProcessEvent BroadcastFunction - Function to execute
+//               on each destination CPU.
+// Parameter:    IN_OPT PVOID Context - The context to be passed to the
+//               BroadcastFunction.
+// Parameter:    IN_OPT PFUNC_FreeFunction FreeFunction - The function to free
+//               the context sent to the BroadcastFunction.
+// Parameter:    IN_OPT PVOID FreeContext - The context to be sent to the
+//               FreeFunction.
+// Parameter:    IN BOOLEAN WaitForHandling - if TRUE waits until each CPU
+//               executes the  BroadcastFunction.
+// Parameter:    IN SMP_IPI_SEND_MODE SendMode - together with Destination
+//               specifies the target processors for IPI delivery.
+// Parameter:    IN SMP_DESTINATION Destination - species the destination
+//               processor(s).
+//******************************************************************************
+STATUS
+SmpSendGenericIpiEx(
+    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
+    IN_OPT  PVOID                   Context,
+    IN_OPT  PFUNC_FreeFunction      FreeFunction,
+    IN_OPT  PVOID                   FreeContext,
+    IN      BOOLEAN                 WaitForHandling,
+    IN _Strict_type_match_
+            SMP_IPI_SEND_MODE       SendMode,
+    _When_(SendMode == SmpIpiSendToCpu || SendMode == SmpIpiSendToGroup, IN)
+            SMP_DESTINATION         Destination
+    );
+\end{lstlisting}
+
+\subsection{Why 64-bit?}
+\label{sect:Why64}
+
+You're probably curious what the advantages of 64-bit code are over 32-bit code. There are several
+benefits both in terms of performance and of security.
+
+The performance benefits are the following:
+\begin{enumerate}
+	\item Processor Context IDentifiers (PCIDs)
+
+	When paging is enabled, i.e. a hardware mechanism is used to translate virtual addresses (VAs)
+to physical addresses (PAs), the CPU optimizes the translation operation by caching mapping
+information. Without PCIDs, on each CR3 switch, i.e. when the executing process changes, all
+caching information is flushed for all the user mode mappings. The kernel mappings remain cached
+because they are marked as global translations in their paging tables which tell the processor that
+those mappings are available regardless of the executing process.
+
+	When PCIDs are used the CPU will no longer flush any mappings on CR3 switches. This is because
+each cached mapping is also indexed by the process's PCID which will ensure the CPU will not use
+the wrong translation after a CR3 switch.
+
+	\item Specialized system call mechanisms: SYSCALL/SYSRET
+
+	This new mechanism available only in long mode is optimized for transitioning between user-mode
+code (running at ring 3) and kernel code (running at ring 0). It is much faster than using an
+interrupt gate for servicing system calls and a little faster and easier to use than the
+SYSENTER/SYSEXIT mechanism.
+
+\end{enumerate}
+
+The security benefits are the following:
+\begin{enumerate}
+	\item XD (eXecution Disable)
+
+	Pages can be marked as non-executable. This is a very important protection mechanism and is the
+mechanism used for DEP (Data Execution Prevention). This is a mitigation for buffer overflow attacks
+due to the fact that when used properly XD will disable execution of data found on the stack or
+dynamically allocated.
+
+	\projectname follows the W $\xor$ X principle, i.e. a memory region MUST not be both executable
+and writable at the same time.
+
+	\item Larger virtual address space (VAS)
+
+	Because the address space is much larger when operating in long mode - \begin{math}2^{48}\end{math}
+versus \begin{math}2^{32}\end{math}-  it is easier to randomize the address space layout of the
+kernel and of the user application thus making the attacker's job harder to pinpoint those addresses.
+
+	Unfortunately, in the current version, \projectname does not perform any address space layout
+randomization (ASLR) and loads the kernel and user-mode applications at fixed virtual addresses.
+
+	\item Protection Keys
+
+	This mechanism offers an additional mechanism for controlling accesses to user-mode addresses.
+If enabled, it can be used to disable read/write access at the page-level granularity for each
+user-mode address. These restrictions also apply for supervisor mode accesses.
+
+	Unfortunately, \projectname does not use this feature.
+
+\end{enumerate}
+
+NOTE: The XD benefit is also available when executing in 32-bit mode with PAE enabled, but the other
+benefits apply exclusively to execution in long mode.
+
+\subsection{Interrupt Handling}
+\label{sect:InterruptHandling}
+
+An interrupt notifies the CPU of some event. For our purposes, we classify interrupts into two broad
+categories:
+\begin{itemize}
+	\item Internal interrupts - these are synchronous interrupts caused directly by CPU instructions.
+Attempts at invalid memory accesses (page faults), division by 0, software interrupts and some other
+activities cause internal interrupts.
+
+	Because they are caused by CPU instructions, internal interrupts are synchronous or synchronized
+with CPU instructions and cannot be disabled.
+
+	\item External interrupts - these are asynchronous events generated outside the current CPU, i.e.
+they may be generated by other CPUs, other hardware devices such as the system timer, keyboard, disk,
+network controller and so on. External interrupts are asynchronous, meaning that their delivery is
+not synchronized with instruction execution. Handling of external interrupts can be postponed by
+disabling interrupts with \func{CpuIntrDisable} and related functions, see
+\fullref{sect:DisablingInt} for details.
+\end{itemize}
+
+The CPU treats both classes of interrupts largely the same way, so \projectname has common 
+infrastructure to handle both classes. The following section describes this common infrastructure.
+The sections after that give the specifics of external and internal interrupts.
+
+\subsubsection{Interrupt Infrastructure}
+
+When an interrupt occurs, the CPU saves its most essential state on the stack and jumps to an 
+interrupt handler routine. The 80x86 architecture supports 256 interrupts, numbered 0 through 255,
+each with an independent handler defined in an array called the interrupt descriptor table or IDT.
+
+In our project, \func{InitIdtHandlers} is responsible for setting up the IDT so that each entry
+corresponds to a unique entry point in \file{\_isr.yasm}. The exception handlers (vectors between 0
+and 31) have proper names, while the interrupt handlers are generated using a macro and have the
+\func{GenericIsrN} name - where N is between 32 and 255. Because the CPU doesn’t give us any other
+way to find out the interrupt number, each entry point pushes the interrupt number on the stack.
+For consistent interrupt handling, a dummy error code is pushed on the stack for interrupts which
+do not generate such error codes. After this information is saved the \func{PreIsrHandler} is
+ called - this function saves all the general purpose registers on the stack and calls the
+\func{IsrCommonHandler} C function.
+
+\func{IsrCommonHandler} branches to \func{\_IsrExceptionHandler} for exceptions and to
+\func{\_IsrInterruptHandler} for any other interrupts. These are described in the
+\fullref{sect:IntInterrupt} and \fullref{sect:ExtInterrupt}.
+
+If \func{IsrCommonHandler} handles the interrupt successfully, i.e. either the exception was
+benign or the interrupt was acknowledged by a device device, control returns to \func{PreIsrHandler}.
+The registers and the stack are restored and the CPU returns from the interrupt through the IRETQ
+instruction.
+
+\textbf{NOTE: Execution of both classes of interrupt handlers currently happen with interrupts
+disabled.}
+
+As a result, an interrupt handler effectively monopolizes the CPU and delays all other activities on
+that CPU. Therefore, external interrupt handlers should complete as quickly as they can. Anything
+that require much CPU time should instead run in a kernel thread, possibly one that the interrupt
+unblocks using a synchronization primitive.
+
+\subsubsection{Internal Interrupt Handling}
+\label{sect:IntInterrupt}
+
+Internal interrupts are caused directly by CPU instructions executed by the running kernel thread or
+user process (from project 2 onward). An internal interrupt is therefore said to arise in a
+process context.
+
+In the current project implementation, the only type of exceptions \func{\_IsrExceptionHandler} is 
+able to solve are page fault exceptions (see \fullref{sect:PfHandling} for more details.
+For any other exceptions or when a \#PF cannot be satisfied the interrupt frame and some of the
+stack area is logged to help debug the problem and the system asserts.
+
+\subsubsection{External Interrupt Handling}
+\label{sect:ExtInterrupt}
+
+External interrupts are caused by events outside the CPU. They are asynchronous, so they can be
+invoked at any time that interrupts have not been disabled. We say that an external interrupt runs
+in an interrupt context.
+
+In an external interrupt, the interrupt frame or the processor state is not passed to the handler
+because it is not very meaningful. It describes the state of the thread or process that was
+interrupted, but there is no way to predict which one that is. It is possible, although rarely
+useful, to examine it, but modifying it is a recipe for disaster.
+
+An external interrupt handler must \textbf{not sleep, yield or block}, which rules out using executive
+synchronization mechanisms - primitive synchronization or interlocked operations can still be used,
+see \fullref{sect:Synch}.
+Sleeping in interrupt context would effectively put the interrupted thread to sleep and block any
+interrupts of lower or equal priority than the one currently serviced. This would be disastrous
+and may cause the next scheduled thread to run indefinitely because the scheduler interrupt may
+never occur again.
+
+Interrupt delivery to a CPU is controlled by the IOAPIC (system-wide) and the LAPIC (per CPU). If
+the external interrupt was acknowledged by a device driver it is considered handled and it is
+acknowledged (see \func{IomuAckInterrupt}).
+
+After the interrupt was acknowledged \func{\_IsrInterruptHandler} checks if it should preempt the
+current thread or not and takes the appropriate action.
+
+To register an interrupt handler for a device \func{IoRegisterInterrupt} and
+\func{IoRegisterInterruptEx} can be used.
+
+\section{Threads}
+\label{sect:Threads}
+
+\subsection{Thread Structure}
+
+The structure defining a thread is found in \file{thread\_internal.h}.
+\begin{lstlisting}[caption={Thread structure},label={lst:ThreadStruct}]
+typedef struct _THREAD
+{
+    REF_COUNT               RefCnt;
+
+    TID                     Id;
+    char*                   Name;
+
+    // Currently the thread priority is not used for anything
+    THREAD_PRIORITY         Priority;
+    THREAD_STATE            State;
+
+    // valid only if State == ThreadStateTerminated
+    STATUS                  ExitStatus;
+    EX_EVENT                TerminationEvt;
+
+    volatile THREAD_FLAGS   Flags;
+
+    // Lock which ensures there are no race conditions between a thread that
+    // blocks and a thread on another CPU which wants to unblock it
+    LOCK                    BlockLock;
+
+    // List of all the threads in the system (including those blocked or dying)
+    LIST_ENTRY              AllList;
+
+    // List of the threads ready to run
+    LIST_ENTRY              ReadyList;
+
+    // List of the threads in the same process
+    LIST_ENTRY              ProcessList;
+
+    // Incremented on each clock tick for the running thread
+    QWORD                   TickCountCompleted;
+
+    // Counts the number of ticks the thread has currently run without being
+    // de-scheduled, i.e. if the thread yields the CPU to another thread the
+    // count will be reset to 0, else if the thread yields, but it will
+    // scheduled again the value will be incremented.
+    QWORD                   UninterruptedTicks;
+
+    // Incremented if the thread yields the CPU before the clock
+    // ticks, i.e. by yielding or by blocking
+    QWORD                   TickCountEarly;
+
+    // The highest valid address for the kernel stack (its initial value)
+    PVOID                   InitialStackBase;
+
+    // The size of the kernel stack
+    DWORD                   StackSize;
+
+    // The current kernel stack pointer (it gets updated on each thread switch,
+    // its used when resuming thread execution)
+    PVOID                   Stack;
+
+    // MUST be non-NULL for all threads which belong to user-mode processes
+    PVOID                   UserStack;
+
+    struct _PROCESS*        Process;
+} THREAD, *PTHREAD;
+\end{lstlisting}
+
+We will summarize the most important fields:
+\begin{itemize}
+	\item TID Id
+
+	Unique identifier, begins at 0 and is incremented by \macro{TID\_INCREMENT} (currently 4) for
+each thread created. There is no need for recycling the ids because a TID is defined as a QWORD and
+ even if the increment is 4, we'll run out of IDs (i.e. wrap around to 0) after \begin{math}2^{62}\end{math}
+(4,611,686,018,427,387,904) threads are created. We *probably* won't be running for that long.
+
+	\item THREAD\_PRIORITY Priority
+
+	A thread priority, ranging from \macro{ThreadPriorityLowest} (0) to 
+\macro{ThreadPriorityMaximum} (31). Lower numbers correspond to lower priorities, so that priority 0
+is the lowest priority and priority 31 is the highest. \projectname as provided ignores thread 
+priorities, but you will implement priority scheduling in project 1.
+
+	\item THREAD\_STATE State
+
+	This field best describes what the thread is currently doing (running on the CPU, waiting for a
+resource, waiting to be scheduled or dying). See \fullref{sect:ThreadStates} for details.
+
+	\item LIST\_ENTRY AllList
+
+	This list element is used to link the thread into the list of all threads. Each thread
+is inserted into this list when it is created and removed when it exits. The 
+\func{ThreadExecuteForEachThreadEntry} function should be used to iterate over all threads. See
+\fullref{sect:Lists} to see how linked lists work in \projectname.
+
+	\item LIST\_ENTRY ReadyList
+
+	A list element used to put the thread into doubly linked lists, either ready list (the list of 
+threads ready to run) or a list of threads waiting on an executive resource. It can do double duty
+because a thread waiting on an executive resource is not ready, and vice versa.
+
+	\item LIST\_ENTRY ProcessList
+
+	A list element used to link all the threads in the same process. On the first project you will
+see this list identical to the ready list because there is only one process: the "System" process
+representing the \projectname kernel.
+
+	\item PVOID InitialStackBase
+
+	Useful only for debugging purposes in the first project. Will be used in the second project to
+determine the user threads kernel stacks. More on this in \fullref{sect:InterruptHandling}.
+
+	\item PVOID Stack
+
+	Every thread has its own stack to keep track of its state. When the thread is running, the CPU’s
+stack pointer register tracks the top of the stack and this member is unused. But when the CPU
+switches to another thread, this member saves the thread’s stack pointer. No other members are 
+needed to save the thread’s registers, because the other registers that must be saved are saved on
+the stack.
+
+	When an interrupt occurs, whether in the kernel or a user program, an
+\struct{INTERRUPT\_STACK\_COMPLETE} structure is pushed onto the stack. When the interrupt occurs in
+a user program, this structure is always at the address pointed by \var{InitialStackBase}.
+
+	\item PVOID UserStack
+
+	Will be NULL for all the threads created in the first project. This field is valid only for
+threads belonging to user-mode processes and points to the stack which is used by the thread when
+executing user-mode code.
+\end{itemize}
+
+\subsection{Thread Functions}
+
+The functions implemented by \file{thread.c} are exposed in two separate files: \file{thread.h}
+containing the functions which may be used by any components (drivers or exposed as system calls)
+and \file{thread\_internal.h} which should only be used by the components in \projectname which
+work closely with the thread module.
+
+\begin{lstlisting}[caption={Thread Public Interface},label={lst:ThPublicFuncs}]
+//******************************************************************************
+// Function:     ThreadCreate
+// Description:  Spawns a new thread named Name with priority Function which
+//               will execute the function Function which will receive as its
+//               single parameter Context. The function returns a pointer
+//               (handle) to the thread structure.
+// Returns:      STATUS
+// Parameter:    IN_Z char * Name
+// Parameter:    IN THREAD_PRIORITY Priority
+// Parameter:    IN PFUNC_ThreadStart Function
+// Parameter:    IN_OPT PVOID Context
+// Parameter:    OUT_PTR PTHREAD * Thread
+// NOTE:         The thread may terminate at any time, but its data structure
+//               will not be un-allocated until the handle receive in Thread is
+//               closed with ThreadCloseHandle.
+//******************************************************************************
+STATUS
+ThreadCreate(
+    IN_Z        char*               Name,
+    IN          THREAD_PRIORITY     Priority,
+    IN          PFUNC_ThreadStart   Function,
+    IN_OPT      PVOID               Context,
+    OUT_PTR     PTHREAD*            Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadYield
+// Description:  Yields the CPU to the scheduler, which picks a new thread to
+//               run. The new thread might be the current thread, so you can't
+//               depend on this function to keep this thread from running for
+//               any particular length of time.
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+void
+ThreadYield(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadExit
+// Description:  Causes the current thread to exit. Never returns.
+// Returns:      void
+// Parameter:    IN STATUS ExitStatus
+//******************************************************************************
+void
+ThreadExit(
+    IN      STATUS              ExitStatus
+    );
+
+//******************************************************************************
+// Function:     ThreadWaitForTermination
+// Description:  Waits for a thread to terminate. The exit status of the thread
+//               will be placed in ExitStatus.
+// Returns:      void
+// Parameter:    IN PTHREAD Thread
+// Parameter:    OUT STATUS * ExitStatus
+//******************************************************************************
+void
+ThreadWaitForTermination(
+    IN      PTHREAD             Thread,
+    OUT     STATUS*             ExitStatus
+    );
+
+//******************************************************************************
+// Function:     ThreadCloseHandle
+// Description:  Closes a thread handle received from ThreadCreate. This is
+//               necessary for the structure to be destroyed when it is no
+//               longer needed.
+// Returns:      void
+// Parameter:    INOUT PTHREAD Thread
+// NOTE:         If you need to wait for a thread to terminate or find out its
+//               termination status call this function only after you called
+//               ThreadWaitForTermination.
+//******************************************************************************
+void
+ThreadCloseHandle(
+    INOUT   PTHREAD             Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadGetName
+// Description:  Returns the thread's name.
+// Returns:      const char*
+// Parameter:    IN_OPT PTHREAD Thread If NULL returns the name of the
+//               current thread.
+//******************************************************************************
+const
+char*
+ThreadGetName(
+    IN_OPT  PTHREAD             Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadGetId
+// Description:  Returns the thread's ID.
+// Returns:      TID
+// Parameter:    IN_OPT PTHREAD Thread - If NULL returns the ID of the
+//               current thread.
+//******************************************************************************
+TID
+ThreadGetId(
+    IN_OPT  PTHREAD             Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadGetPriority
+// Description:  Returns the thread's priority. In the presence of
+//               priority donation, returns the higher(donated) priority.
+// Returns:      THREAD_PRIORITY
+// Parameter:    IN_OPT PTHREAD Thread - If NULL returns the priority of the
+//               current thread.
+//******************************************************************************
+THREAD_PRIORITY
+ThreadGetPriority(
+    IN_OPT  PTHREAD             Thread
+    );
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Thread Private Interface},label={lst:ThPrivateFuncs}]
+//******************************************************************************
+// Function:     ThreadSystemPreinit
+// Description:  Basic global initialization. Initializes the all threads list,
+//               the ready list and all the locks protecting the global
+//               structures.
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+void
+_No_competing_thread_
+ThreadSystemPreinit(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadSystemInitMainForCurrentCPU
+// Description:  Call by each CPU to initialize the main execution thread. Has a
+//               different flow than any other thread creation because some of
+//               the thread information already exists and it is currently
+//               running.
+// Returns:      STATUS
+// Parameter:    void
+//******************************************************************************
+STATUS
+ThreadSystemInitMainForCurrentCPU(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadSystemInitIdleForCurrentCPU
+// Description:  Called by each CPU to spawn the idle thread. Execution will not
+//               continue until after the idle thread is first scheduled on the
+//               CPU. This function is also responsible for enabling interrupts
+//               on the processor.
+// Returns:      STATUS
+// Parameter:    void
+//******************************************************************************
+STATUS
+ThreadSystemInitIdleForCurrentCPU(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadCreateEx
+// Description:  Same as ThreadCreate except it also takes an additional
+//               parameter, the process to which the thread should belong. This
+//               function must be called for creating user-mode threads.
+// Returns:      STATUS
+// Parameter:    IN_Z char * Name
+// Parameter:    IN THREAD_PRIORITY Priority
+// Parameter:    IN PFUNC_ThreadStart Function
+// Parameter:    IN_OPT PVOID Context
+// Parameter:    OUT_PTR PTHREAD * Thread
+// Parameter:    INOUT struct _PROCESS * Process
+//******************************************************************************
+STATUS
+ThreadCreateEx(
+    IN_Z        char*               Name,
+    IN          THREAD_PRIORITY     Priority,
+    IN          PFUNC_ThreadStart   Function,
+    IN_OPT      PVOID               Context,
+    OUT_PTR     PTHREAD*            Thread,
+    INOUT       struct _PROCESS*    Process
+    );
+
+//******************************************************************************
+// Function:     ThreadTick
+// Description:  Called by the timer interrupt at each timer tick. It keeps
+//               track of thread statistics and triggers the scheduler when a
+//               time slice expires.
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+void
+ThreadTick(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadBlock
+// Description:  Transitions the running thread into the blocked state. The
+//               thread will not run again until it is unblocked (ThreadUnblock)
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+void
+ThreadBlock(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadUnblock
+// Description:  Transitions thread, which must be in the blocked state, to the
+//               ready state, allowing it to resume running. This is called when
+//               the resource on which the thread is waiting for becomes
+//               available.
+// Returns:      void
+// Parameter:    IN PTHREAD Thread
+//******************************************************************************
+void
+ThreadUnblock(
+    IN      PTHREAD              Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadYieldOnInterrupt
+// Description:  Returns TRUE if the thread must yield the CPU at the end of
+//               this interrupt. FALSE otherwise.
+// Returns:      BOOLEAN
+// Parameter:    void
+//******************************************************************************
+BOOLEAN
+ThreadYieldOnInterrupt(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadTerminate
+// Description:  Signals a thread to terminate.
+// Returns:      void
+// Parameter:    INOUT PTHREAD Thread
+// NOTE:         This function does not cause the thread to instantly terminate,
+//               if you want to wait for the thread to terminate use
+//               ThreadWaitForTermination.
+// NOTE:         This function should be used only in EXTREME cases because it
+//               will not free the resources acquired by the thread.
+//******************************************************************************
+void
+ThreadTerminate(
+    INOUT   PTHREAD             Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadTakeBlockLock
+// Description:  Takes the block lock for the executing thread. This is required
+//               to avoid a race condition which would happen if a thread is
+//               unblocked while in the process of being blocked (thus still
+//               running on the CPU).
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+void
+ThreadTakeBlockLock(
+    void
+    );
+
+//******************************************************************************
+// Function:     ThreadExecuteForEachThreadEntry
+// Description:  Iterates over the all threads list and invokes Function on each
+//               entry passing an additional optional Context parameter.
+// Returns:      STATUS
+// Parameter:    IN PFUNC_ListFunction Function
+// Parameter:    IN_OPT PVOID Context
+//******************************************************************************
+STATUS
+ThreadExecuteForEachThreadEntry(
+    IN      PFUNC_ListFunction  Function,
+    IN_OPT  PVOID               Context
+    );
+
+//******************************************************************************
+// Function:     GetCurrentThread
+// Description:  Returns the running thread.
+// Returns:      void
+//******************************************************************************
+#define GetCurrentThread()      ((THREAD*)__readmsr(IA32_FS_BASE_MSR))
+
+//******************************************************************************
+// Function:     SetCurrentThread
+// Description:  Sets the current running thread.
+// Returns:      void
+// Parameter:    IN PTHREAD Thread
+//******************************************************************************
+void
+SetCurrentThread(
+    IN      PTHREAD     Thread
+    );
+
+//******************************************************************************
+// Function:     ThreadSetPriority
+// Description:  Sets the thread's priority to new priority. If the
+//               current thread no longer has the highest priority, yields.
+// Returns:      void
+// Parameter:    IN THREAD_PRIORITY NewPriority
+//******************************************************************************
+void
+ThreadSetPriority(
+    IN      THREAD_PRIORITY     NewPriority
+    );
+\end{lstlisting}
+
+\subsection{Thread States}
+\label{sect:ThreadStates}
+
+The states through which each thread can go through are: \macro{Ready}, \macro{Running},
+\macro{Blocked} and \macro{Dying}. This is illustrated in \fullref{fig:ThreadStates}.
+\begin{itemize}
+	\item Ready: The thread is in the global thread ready list waiting to receive CPU time. It is
+	ready because it is not waiting for any resource.
+	\item Running: The thread is currently executing on a CPU: it will run until one the following
+	happens:
+		\begin{enumerate}
+			\item The thread's time quantum expires, a clock interrupt occurs, the scheduler
+			chooses a different thread to run and places the current one in the ready list.
+			\item The thread requires a resource to continue execution and it is not currently
+			available so it will be blocked.
+			\item The thread willingly yields the CPU to another thread and gets placed in the ready
+			list.
+		\end{enumerate}
+	\item Blocked: The thread is waiting for a currently unavailable resource. Once the resource
+	will become available it will be moved to the ready list.
+	\item Dying: The thread has finished its execution or another thread forcefully terminated it.
+\end{itemize}
+
+\begin{figure}
+	\centering
+	\includegraphics{ThreadStates}
+		\caption{Thread States}
+	\label{fig:ThreadStates}
+\end{figure}
+
+The \macro{Initializing} and \macro{Destroyed} states are pseudo-states and have no relevance in the
+code. These states are illustrated for an easier understanding on where a thread starts execution
+and where it ends it.
+
+\subsection{Thread Switching} 
+\label{sect:ThreadSwitch}
+
+\func{\_ThreadSchedule} is responsible for switching threads. It is only called by the three exposed
+thread functions that need to switch threads: \func{ThreadBlock}, \func{ThreadExit} and
+\func{ThreadYield}. Before any of these functions call \func{\_ThreadSchedule}, they disable
+interrupts so as not to be de-scheduled by a timer while calling these already de-scheduling
+functions.
+
+The \func{\_ThreadSchedule} function does the following: it acquires the ready list lock, calls
+\func{\_ThreadGetReadyThread} to remove the next thread from the ready list (or the idle thread if
+there are no ready threads).
+
+If there are no ready threads and the current thread is still capable of running it is preferred
+instead of the idle thread, but if there is a ready thread prepared it will be the one scheduled
+instead of the old one.
+
+If the next thread to be executed is different than the old thread the following will happen:
+\begin{itemize}
+	\item If the new process differs from the old one a CR3 switch will occur and the paging tables
+of the scheduled process will be activated.
+	\item The \func{ThreadSwitch} assembly function is called - this function stores a pointer to 
+the current stack of the old thread in the \var{Stack} member and restores the stack pointer of the
+new thread.
+\end{itemize}
+
+After the thread switch occurs the \func{ThreadCleanupPostSchedule} function is called to release
+the ready list lock (this cannot be done before the old thread is de-scheduled else it might be
+scheduled on two processors at once) and the block lock of the previous thread is also released if
+it is held by the current CPU (this cannot be released earlier either because the thread cannot be
+unblocked until it was blocked and it is not blocked while it is still executing on the CPU).
+
+This function will also dereference the previous thread in case it is dying. The thread structure
+may still live on if its creator did not close its handle (by calling \func{ThreadCloseHandle}).
+
+The reason why there is a separate \func{ThreadCleanupPostSchedule} function and these operations do
+not occur in the \func{\_ThreadSchedule} function is that the latter function is not called on thread
+creation while the former is. For more details see \fullref{sect:ThreadInit}.
+
+\subsection{Thread Initialization}
+\label{sect:ThreadInit}
+
+One of the trickiest parts when implementing threads is getting them to start-up. Thread switching
+is easy when you have running threads.
+
+\projectname applies the following trick to get the first thread running: it prepares on the stack
+a \struct{PROCESSOR\_STATE} structure for setting up the initial register values, the address of the
+\func{ThreadStart} function as the first return address and an \struct{INTERRUPT\_STACK} structure
+for simulating a return from an interrupt (this is the only way to start a user-mode thread and 
+there was no use of having a different start-up method for kernel threads).
+
+For an illustration of the initial stack frame see the ASCII figure above
+\func{\_ThreadSetupInitialState} and check out the implementation for further details.
+
+When the newly created thread starts its first execution in \func{ThreadSwitch} it will call the
+\func{RestoreRegisters} function to setup its initial register values, it will return at the start
+of the \func{ThreadStart} function, call \func{ThreadCleanupPostSchedule} and finally perform an
+IRETQ instruction which will cause the thread to continue execution in \func{\_ThreadKernelFunction}
+for kernel threads. For user-mode threads (project 2) see \fullref{sect:UserThreads}.
+
+This function calls the PFUNC\_ThreadStart function received as parameter for \func{ThreadCreate}.
+Its only responsibility is to make sure \func{ThreadExit} is called by each thread even if
+not explicitly coded.
+
+\subsubsection{User-mode Threads}
+\label{sect:UserThreads}
+
+The IRETQ instruction will cause the kernel mode thread to switch its privilege level from ring 0
+to ring 3 and to start executing user-mode code. The user-mode function executed depends on which
+user thread is started.
+
+If the main thread is started (i.e. the first thread in the user-mode process) the function executed
+will be determined by the AddressOfEntryPoint field defined in the Portable Executable (PE) header.
+For our project, this will correspond to the \func{\_\_start} function implemented in the
+UsermodeLibrary project. This function is responsible for setting up the environment for a user-mode
+application before actually giving it control. Similar to \func{\_ThreadKernelFunction} this
+function also makes sure that the thread exits properly through the \func{SyscallThreadExit} call.
+
+If the main thread wishes to create additional threads it should call \func{UmCreateThread}. The
+UsermodeLibrary will internally call \func{SyscallThreadCreate} with \func{\_\_start\_thread} as the
+function. This is to ensure that the newly spawned thread properly exits through the
+\func{SyscallThreadExit} system call.
+
+\section{Processes}
+\label{sect:Processes}
+
+\subsection{Process Structure}
+
+The structure defining a process is found in \file{process\_internal.h}.
+
+\begin{lstlisting}[caption={Process Structure},label={lst:ProcessStruct}]
+typedef struct _PROCESS
+{
+    REF_COUNT                       RefCnt;
+
+    // The PIDs will also be used for the CR3 PCID
+    PID                             Id;
+
+    char*                           ProcessName;
+
+    // Command line related
+
+    // The command line also contains the ProcessName
+    char*                           FullCommandLine;
+    DWORD                           NumberOfArguments;
+
+    // Signaled when the last thread is removed from the
+    // process list
+    EX_EVENT                        TerminationEvt;
+
+    // Valid only if TerminationEvt is signaled. The status
+    // of the process is given by the status of the last
+    // exiting thread from the process.
+    STATUS                          TerminationStatus;
+
+    MUTEX                           ThreadListLock;
+
+    _Guarded_by_(ThreadListLock)
+    LIST_ENTRY                      ThreadList;
+
+    _Guarded_by_(ThreadListLock)
+    volatile DWORD                  NumberOfThreads;
+
+    // The difference between NumberOfThreads and ActiveThreads is the following
+    // ActiveThreads represents number of threads in process which have not died have
+    // NumberOfThreads includes the threads which died but have not yet been destroyed
+    _Interlocked_
+    volatile DWORD                  ActiveThreads;
+
+    // Links all the processes in the global process list
+    LIST_ENTRY                      NextProcess;
+
+    // Pointer to the process' paging structures
+    struct _PAGING_LOCK_DATA*       PagingData;
+
+    // Pointer to the process' NT header information
+    struct _PE_NT_HEADER_INFO*      HeaderInfo;
+
+    // VaSpace used only for UM virtual memory allocations
+    struct _VMM_RESERVATION_SPACE*  VaSpace;
+} PROCESS, *PPROCESS;
+\end{lstlisting}
+
+We will summarize the most important fields:
+\begin{itemize}
+	\item PID Id
+
+	Unique identifier, valid values range between 1 and 4095. These can be recycled, so while
+process A has ID 7 after it dies another process may take its former ID value. The reason why PIDs
+are implemented this way is because of the limitations of PCIDs.
+
+	\item char* ProcessName
+
+	The name of the process running - this is the name of the executable.
+
+	\item char* FullCommandLine
+
+	The whole process command line - including the application's name.
+
+	\item DWORD NumberOfArguments
+
+	The number of arguments - including the process name or put differently: the number of space
+separated strings in FullCommandLine.
+
+	\item LIST\_ENTRY ThreadList
+
+	Linked list of threads belonging to the process.
+
+	\item LIST\_ENTRY NextProcess
+
+	List entry linking the global process list.
+\end{itemize}
+
+\subsection{Process functions}
+
+The functions implemented by process.c are exposed in two separate files: \textit{process.h}
+containing the functions which may be used by any components (drivers or exposed as system calls)
+and \textit{process\_internal.h} which should only be used by the components in \projectname which
+work closely with the process module.
+
+\begin{lstlisting}[caption={Process Public Interface},label={lst:ProcPublic}]
+//******************************************************************************
+// Function:     ProcessCreate
+// Description:  Creates a new process to execute the application found at
+//               PathToExe with Arguments (may be NULL). The function returns a
+//               pointer (handle) to the process structure.
+// Returns:      STATUS
+// Parameter:    IN_Z char * PathToExe
+// Parameter:    IN_OPT_Z char * Arguments
+// Parameter:    OUT_PTR PPROCESS * Process
+// NOTE:         All the processes's threads may terminate, but the process data
+//               structure will not be un-allocated until the handle receive in
+//               Process is closed with ProcessCloseHandle.
+//******************************************************************************
+STATUS
+ProcessCreate(
+    IN_Z        char*       PathToExe,
+    IN_OPT_Z    char*       Arguments,
+    OUT_PTR     PPROCESS*   Process
+    );
+
+//******************************************************************************
+// Function:     ProcessWaitForTermination
+// Description:  Blocks until the process received as a parameter terminates
+//               execution.
+// Returns:      void
+// Parameter:    IN PPROCESS Process
+// Parameter:    OUT STATUS* TerminationStatus - Corresponds to the status of
+//               the last exiting thread.
+//******************************************************************************
+void
+ProcessWaitForTermination(
+    IN          PPROCESS    Process,
+    OUT         STATUS*     TerminationStatus
+    );
+
+//******************************************************************************
+// Function:     ProcessCloseHandle
+// Description:  Closes a process handle received from ProcessCreate. This is
+//               necessary for the structure to be destroyed when it is no
+//               longer needed.
+// Returns:      void
+// Parameter:    PPROCESS    Process
+//******************************************************************************
+void
+ProcessCloseHandle(
+    _Pre_valid_ _Post_invalid_
+                PPROCESS    Process
+    );
+
+//******************************************************************************
+// Function:     ProcessGetName
+// Description:  Returns the name of the currently executing process (if the
+//               parameter is NULL) or of the specified process
+// Returns:      const char*
+// Parameter:    IN_OPT PPROCESS Process
+//******************************************************************************
+const
+char*
+ProcessGetName(
+    IN_OPT      PPROCESS    Process
+    );
+
+//******************************************************************************
+// Function:     ProcessGetName
+// Description:  Returns the PID of the currently executing process (if the
+//               parameter is NULL) or of the specified process
+// Returns:      PID
+// Parameter:    IN_OPT PPROCESS Process
+//******************************************************************************
+PID
+ProcessGetId(
+    IN_OPT      PPROCESS    Process
+    );
+
+//******************************************************************************
+// Function:     ProcessIsSystem
+// Description:  Checks if a process or the currently executing process (if the
+//               parameter is NULL) is the system process.
+// Returns:      BOOLEAN
+// Parameter:    IN_OPT PPROCESS Process
+//******************************************************************************
+BOOLEAN
+ProcessIsSystem(
+    IN_OPT      PPROCESS    Process
+    );
+
+//******************************************************************************
+// Function:     ProcessTerminate
+// Description:  Signals a process for termination (the current process will be
+//               terminated if the parameter is NULL).
+// Returns:      void
+// Parameter:    INOUT PPROCESS Process
+//******************************************************************************
+void
+ProcessTerminate(
+    INOUT       PPROCESS    Process
+    );
+
+//******************************************************************************
+// Function:     GetCurrentProcess
+// Description:  Retrieves the executing process.
+// Returns:      PPROCESS
+// Parameter:    void
+//******************************************************************************
+PPROCESS
+GetCurrentProcess(
+    void
+    );
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Process Private Interface},label={lst:ProcPrivate}]
+//******************************************************************************
+// Function:     ProcessSystemPreinit
+// Description:  Basic global initialization. Initializes the PID bitmap, the
+//               process list and their associated locks.
+// Returns:      void
+// Parameter:    void
+//******************************************************************************
+_No_competing_thread_
+void
+ProcessSystemPreinit(
+    void
+    );
+
+//******************************************************************************
+// Function:     ProcessSystemInitSystemProcess
+// Description:  Initializes the System process.
+// Returns:      STATUS
+// Parameter:    void
+//******************************************************************************
+_No_competing_thread_
+STATUS
+ProcessSystemInitSystemProcess(
+    void
+    );
+
+//******************************************************************************
+// Function:     ProcessRetrieveSystemProcess
+// Description:  Retrieves a pointer to the system process.
+// Returns:      PPROCESS
+// Parameter:    void
+//******************************************************************************
+PPROCESS
+ProcessRetrieveSystemProcess(
+    void
+    );
+
+//******************************************************************************
+// Function:     ProcessInsertThreadInList
+// Description:  Inserts the Thread in the Process thread list.
+// Returns:      void
+// Parameter:    INOUT PPROCESS Process
+// Parameter:    INOUT struct _THREAD * Thread
+//******************************************************************************
+void
+ProcessInsertThreadInList(
+    INOUT   PPROCESS            Process,
+    INOUT   struct _THREAD*     Thread
+    );
+
+//******************************************************************************
+// Function:     ProcessNotifyThreadTermination
+// Description:  Called when a thread terminates execution. If this was the last
+//               active thread in the process it will signal the processes's
+//               termination event.
+// Returns:      void
+// Parameter:    IN struct _THREAD * Thread
+//******************************************************************************
+void
+ProcessNotifyThreadTermination(
+    IN      struct _THREAD*     Thread
+    );
+
+//******************************************************************************
+// Function:     ProcessRemoveThreadFromList
+// Description:  Removes the Thread from its container process thread list.
+//               Called when a thread is destroyed.
+// Returns:      void
+// Parameter:    INOUT struct _THREAD * Thread
+//******************************************************************************
+void
+ProcessRemoveThreadFromList(
+    INOUT   struct _THREAD*     Thread
+    );
+
+//******************************************************************************
+// Function:     ProcessExecuteForEachProcessEntry
+// Description:  Iterates over the all threads list and invokes Function on each
+//               entry passing an additional optional Context parameter.
+// Returns:      STATUS
+// Parameter:    IN PFUNC_ListFunction Function
+// Parameter:    IN_OPT PVOID Context
+//******************************************************************************
+STATUS
+ProcessExecuteForEachProcessEntry(
+    IN      PFUNC_ListFunction  Function,
+    IN_OPT  PVOID               Context
+    );
+
+//******************************************************************************
+// Function:     ProcessActivatePagingTables
+// Description:  Performs a switch to the Process paging tables.
+// Returns:      void
+// Parameter:    IN PPROCESS Process
+// Parameter:    IN BOOLEAN InvalidateAddressSpace - if TRUE all the cached
+//               translations for the Process PCID will be flushed. This option
+//               is useful when a process terminates and its PCID will be
+//               later used by another process.
+//******************************************************************************
+void
+ProcessActivatePagingTables(
+    IN      PPROCESS            Process,
+    IN      BOOLEAN             InvalidateAddressSpace
+    );
+\end{lstlisting}
+
+\subsection{Program Startup}
+\label{sect:ProgramStart}
+
+In \projectname the UsermodeLibrary library defines the entry point of every application:
+\func{\_\_start} in \file{um\_lib.c}. As you can see from the code its job is to perform some basic
+initialization and make sure that the \func{SyscallThreadExit} call is made after the actual
+application finishes.
+
+All user applications in \projectname must implement the \func{\_\_main} function which receives the
+standard parameters for any C main thread: argc and argv.
+
+The kernel must put the arguments for the initial function on the stack before it allows the user
+program to begin executing. The arguments are passed in the same way as the normal calling
+convention. See \href{https://msdn.microsoft.com/en-us/library/zthk2dkh.aspx}{MSDN Parameter Passing}.
+
+We will now consider an example on how to handle arguments for the following command:
+"SampleApplication Johnny is a good kid". First, break the commands into words: "SampleApplication",
+"Johnny", "is", "a", "good" , "kid". Place the words at the top of the stack. Order doesn't matter,
+because they will be referenced through pointers.
+
+Then, push the address of each string, on the stack, in right-to-left order. These are the elements
+of argv. The order ensures that argv[0] is at the lowest virtual address. The VS compiler assumes
+that the stack is aligned to 16 bytes before the return address is pushed, i.e. the address of the
+return address must be a multiple of 8, but not 10, i.e. its least significant nibble must be 8
+(see \href{https://msdn.microsoft.com/en-us/library/ms235286.aspx}{MSDN x64 Calling Conventions}).
+
+Then, push argv (the address of argv[0]) and argc, in that order. Finally, push a fake "return
+address": although the entry function will never return, its stack frame must have the same
+structure as any other.
+
+NOTE: The C standard requires a NULL pointer sentinel to also be pushed on the stack after the last
+valid string address, such that argv[argc] is NULL, however \projectname does not require this and
+we will not check this in our tests.
+
+The stack is illustrated in \fullref{fig:UserStackInit}. In this example the stack pointer would be
+initialized to 0x13'FFFF'FF78.
+
+These actions should be taken in \func{\_ThreadSetupMainThreadUserStack}, this function is called
+when the main (first) thread of a process is created. However, if we think a minute, we'll see that
+we have a problem: the OS has access to its virtual space and to the virtual space of the currently
+running process, i.e. we cannot directly access the stack of the newly created process.
+
+To overcome this problem we can temporarily map the physical memory described by the user virtual
+pages in kernel space. For this we can use \func{MmuGetSystemVirtualAddressForUserBuffer}, as a
+result we will obtain a kernel virtual mapping which we can then access. Once the stack is setup
+we can free this virtual address using \func{MmuFreeSystemVirtualAddressForUserBuffer}.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.85]{UserStackInit}
+		\caption{Initial User Stack}
+	\label{fig:UserStackInit}
+\end{figure}
+
+\section{Synchronization}
+\label{sect:Synch}
+
+If sharing of resources between threads is not handled in a careful, controlled fashion, the result
+is usually a big mess. This is especially the case in operating system kernels, where faulty sharing
+can crash the entire machine. \projectname provides several synchronization mechanisms to help out.
+
+Depending on where and what you'll want to synchronize you have the following classes of
+synchronization mechanisms:
+\begin{itemize}
+	\item Primitive: these mechanisms wait for a resource through busy waiting, they do not block
+thread execution and do not allow for preemption because they disable interrupts before starting to
+acquire the resource and leave them disabled until releasing it. These synchronization mechanisms
+can be used anywhere in code. However, due to the fact that they disable interrupts, they should
+be used only when synchronization interrupt handlers with other code.
+
+	\item Executive: these mechanisms rely on the OS for management. If a thread tries to acquire
+an executive resource which is unavailable the thread will be blocked and another will be scheduled
+on the processor. The thread will then get unblocked once the resource is available, thus avoiding
+busy waiting. This mechanism should be used to synchronize code outside of interrupt handlers.
+
+	\item Interlocked operations: if a basic data type is shared and the operations performed on the
+data are simple then atomic interlocked operations can be used. Some operations include: increment,
+addition, exchange, compare and exchange. These mechanism are implemented at the hardware level.
+\end{itemize}
+
+A good way to think of the difference between primitive and executive mechanisms is the following:
+the primitive mechanisms are used to synchronize CPUs, while the executive mechanisms synchronize
+threads.
+
+In both the primitive and executive cases the difference between locks and events can be thought of
+in terms of ownerships. Locks have owners, the owner (either the CPU or thread) must be the one
+releasing the lock, while in the case of the event anyone can signal the event or clear it.
+
+Also, when it comes to events, both primitive and executive events are classified in two categories:
+\begin{enumerate}
+	\item Notification events: once an event is signaled it remains that way until it is manually
+cleared. This means that if N CPUs/threads are waiting for an event they are all notified when the
+event is signaled and will continue execution.
+
+	\item Synchronization events: once an event is signaled it will remain that way only until a
+CPU or thread receives the signal. This means that if N CPUs/threads are waiting for an event only
+one of them will receive the notification and it will atomically clear the event not allowing any
+one else to continue execution.
+\end{enumerate}
+
+\subsection{Primitive}
+\label{sect:PrimSynch}
+
+As said earlier, this class of synchronization mechanisms disable interrupts from the moment they
+try to acquire the resource until they release it.
+
+If the OS used only primitive mechanisms a tight bottle-neck would be created allowing interrupts to
+come only for short periods of time, thus increasing system latency and making everything less
+responsive. In this regard you should be careful and use them as little as possible.
+
+These should be used only when synchronizing data which is shared between an interrupt handler and
+other code.
+
+\subsubsection{Locks}
+
+\projectname supports basic spinlocks (see \fullref{lst:Spinlock}), monitor locks (see \file{monlock.h}),
+read/write spinlocks (see \file{rw\_spinlock.h}) and recursive read/write spinlocks
+(see \file{rec\_rw\_spinlock.h}).
+
+There's no use in shoving the interface for every kind of lock in this document. If you're curious 
+you can check out the mentioned files and read the comments to find out how they work. You should
+ not use the spinlock or monitor lock functions directly, but instead you should use the interface
+ exposed in \file{lock\_common.h}.
+
+If the \func{LockInit}, \func{LockAcquire}, etc, functions will be used then the operating system
+will determine dynamically which basic lock type to use: spinlocks or monitor locks (if the MONITOR
+feature is supported in the CPU). Monitor locks function the same as spinlocks except they conserve
+power and reduce memory contention by using a hardware mechanism to MONITOR and be notified (MWAIT)
+when a memory store occurs to the monitored region.
+
+\begin{lstlisting}[caption={Spinlock Interface},label={lst:Spinlock}]
+//******************************************************************************
+// Function:     SpinlockInit
+// Description:  Initializes a spinlock. No other spinlock* function can be used
+//               before this function is called.
+// Returns:      void
+// Parameter:    OUT PSPINLOCK Lock
+//******************************************************************************
+void
+SpinlockInit(
+    OUT         PSPINLOCK       Lock
+    );
+
+//******************************************************************************
+// Function:     SpinlockAcquire
+// Description:  Spins until the Lock is acquired. On return interrupts will be
+//               disabled and IntrState will hold the previous interruptibility
+//               state.
+// Returns:      void
+// Parameter:    INOUT PSPINLOCK Lock
+// Parameter:    OUT INTR_STATE * IntrState
+//******************************************************************************
+void
+SpinlockAcquire(
+    INOUT       PSPINLOCK       Lock,
+    OUT         INTR_STATE*     IntrState
+    );
+
+//******************************************************************************
+// Function:     SpinlockTryAcquire
+// Description:  Attempts to acquire the Lock. If it is free then the function
+//               will take the lock and return with the interrupts disabled and
+//               IntrState will hold the previous interruptibility state.
+// Returns:      BOOLEAN - TRUE if the lock was acquired, FALSE otherwise
+// Parameter:    INOUT PSPINLOCK Lock
+// Parameter:    OUT INTR_STATE * IntrState
+//******************************************************************************
+BOOL_SUCCESS
+BOOLEAN
+SpinlockTryAcquire(
+    INOUT       PSPINLOCK       Lock,
+    OUT         INTR_STATE*     IntrState
+    );
+
+//******************************************************************************
+// Function:     SpinlockIsOwner
+// Description:  Checks if the current CPU is the lock owner.
+// Returns:      BOOLEAN
+// Parameter:    IN PSPINLOCK Lock
+//******************************************************************************
+BOOLEAN
+SpinlockIsOwner(
+    IN          PSPINLOCK       Lock
+    );
+
+//******************************************************************************
+// Function:     SpinlockRelease
+// Description:  Releases a previously acquired Lock. OldIntrState should hold
+//               the value previous returned by SpinlockAcquire or
+//               SpinlockTryAcquire.
+// Returns:      void
+// Parameter:    INOUT PSPINLOCK Lock
+// Parameter:    IN INTR_STATE OldIntrState
+//******************************************************************************
+void
+SpinlockRelease(
+    INOUT       PSPINLOCK       Lock,
+    IN          INTR_STATE      OldIntrState
+    );
+\end{lstlisting}
+
+\subsubsection{Event}
+
+These mechanisms are not used for protecting a critical region, but for notifying one or more CPUs
+that an event has occurred. If the event is a synchronization event only one CPU receives the signal,
+while if it's a notification event all the CPUs are informed when the signal occurs.
+
+\begin{lstlisting}[caption={Event Interface},label={lst:Event}]
+//******************************************************************************
+// Function:     EvtInitialize
+// Description:  Creates an EVENT object. The behavior differs depending on the
+//               type of event:
+//               -> EventTypeNotification: Once an event is signaled it remains
+//               signaled until it is manually cleared.
+//               -> EventTypeSynchronization: Once an event is signaled, the
+//               first CPU which will wait detect the signal in EvtWaitForSignal
+//               will also clear it, i.e. a single CPU acknowledges the event,
+//               whereas the notification case all the CPUs acknowledge it.
+// Returns:      STATUS
+// Parameter:    OUT EVENT * Event
+// Parameter:    IN EVENT_TYPE EventType
+// Parameter:    IN BOOLEAN Signaled
+//******************************************************************************
+SAL_SUCCESS
+STATUS
+EvtInitialize(
+    OUT     EVENT*          Event,
+    IN      EVENT_TYPE      EventType,
+    IN      BOOLEAN         Signaled
+    );
+
+//******************************************************************************
+// Function:     EvtSignal
+// Description:  Signals an event.
+// Returns:      void
+// Parameter:    INOUT EVENT * Event
+//******************************************************************************
+void
+EvtSignal(
+    INOUT   EVENT*          Event
+    );
+
+//******************************************************************************
+// Function:     EvtClearSignal
+// Description:  Clears an event signal.
+// Returns:      void
+// Parameter:    INOUT EVENT * Event
+//******************************************************************************
+void
+EvtClearSignal(
+    INOUT   EVENT*          Event
+    );
+
+//******************************************************************************
+// Function:     EvtWaitForSignal
+// Description:  Busy waits until an event is signaled.
+// Returns:      void
+// Parameter:    INOUT EVENT * Event
+//******************************************************************************
+void
+EvtWaitForSignal(
+    INOUT   EVENT*          Event
+    );
+
+//******************************************************************************
+// Function:     EvtIsSignaled
+// Description:  Checks if an event is signaled and returns instantly.
+// Returns:      BOOLEAN - TRUE if the event was signaled, FALSE otherwise.
+// Parameter:    INOUT EVENT * Event
+//******************************************************************************
+BOOLEAN
+EvtIsSignaled(
+    INOUT   EVENT*          Event
+    );
+\end{lstlisting}
+
+\subsection{Executive}
+\label{sect:ExSynch}
+
+These synchronization mechanisms are aware of the operating system and are managed more
+efficiently due to this.
+
+These mechanisms differ from the primitive ones due to the fact that they block thread execution and
+remain that way until the resource is freed and they are unblocked.
+
+These mechanisms rely on the primitive ones for their implementation, but where the primitive
+mechanisms disable interrupts for the whole duration, these require interrupts disabled only a
+small amount of time in their acquire and release function; however once an executive resource has
+been acquired interrupts remain enabled.
+
+\subsubsection{Mutex}
+\label{sect:Mutex}
+
+Depending on their initialization, mutexes may either be recursive or not. If a mutex is not
+recursive then the same thread is not allowed to take the mutex more than once before releasing it.
+
+If the mutex is recursive the same thread can take the mutex as many times as it wants (up to 255
+times) but it must also release it the same number of times it has acquired it.
+
+\begin{lstlisting}[caption={Mutex Functions},label={lst:MutexFunc}]
+//******************************************************************************
+// Function:     MutexInit
+// Description:  Initializes a mutex.
+// Returns:      void
+// Parameter:    OUT PMUTEX Mutex
+// Parameter:    IN BOOLEAN Recursive - if TRUE the mutex may be acquired
+//               several times by the same thread, else only once.
+// NOTE:         A recursive mutex must be released as many times as it has been
+//               acquired.
+//******************************************************************************
+_No_competing_thread_
+void
+MutexInit(
+    OUT         PMUTEX      Mutex,
+    IN          BOOLEAN     Recursive
+    );
+
+//******************************************************************************
+// Function:     MutexAcquire
+// Description:  Acquires a mutex. If the mutex is currently held the thread
+//               is placed in a waiting list and its execution is blocked.
+// Returns:      void
+// Parameter:    INOUT PMUTEX Mutex
+//******************************************************************************
+ACQUIRES_EXCL_AND_REENTRANT_LOCK(*Mutex)
+REQUIRES_NOT_HELD_LOCK(*Mutex)
+void
+MutexAcquire(
+    INOUT       PMUTEX      Mutex
+    );
+
+//******************************************************************************
+// Function:     MutexRelease
+// Description:  Releases a mutex. If there is a thread on the waiting list it
+//               will be unblocked and placed as the lock's holder - this will
+//               ensure fairness.
+// Returns:      void
+// Parameter:    INOUT PMUTEX Mutex
+//******************************************************************************
+RELEASES_EXCL_AND_REENTRANT_LOCK(*Mutex)
+REQUIRES_EXCL_LOCK(*Mutex)
+void
+MutexRelease(
+    INOUT       PMUTEX      Mutex
+    );
+\end{lstlisting}
+
+\subsubsection{Executive Event}
+\label{sect:ExEvent}
+
+
+\begin{lstlisting}[caption={Executive Event Functions},label={lst:ExEventFunc}]
+//******************************************************************************
+// Function:     ExEventInit
+// Description:  Initializes an executive event. As in the case of primitive
+//               events, these may be notification or synchronization events.
+// Returns:      STATUS
+// Parameter:    OUT EX_EVENT * Event
+// Parameter:    IN EX_EVT_TYPE EventType
+// Parameter:    IN BOOLEAN Signaled
+//******************************************************************************
+STATUS
+ExEventInit(
+    OUT     EX_EVENT*     Event,
+    IN      EX_EVT_TYPE   EventType,
+    IN      BOOLEAN       Signaled
+    );
+
+//******************************************************************************
+// Function:     ExEventSignal
+// Description:  Signals an event. If the waiting list is not empty it will
+//               wakeup one or multiple threads depending on the event type.
+// Returns:      void
+// Parameter:    INOUT EX_EVENT * Event
+//******************************************************************************
+void
+ExEventSignal(
+    INOUT   EX_EVENT*      Event
+    );
+
+//******************************************************************************
+// Function:     ExEventClearSignal
+// Description:  Clears an event signal.
+// Returns:      void
+// Parameter:    INOUT EX_EVENT * Event
+//******************************************************************************
+void
+ExEventClearSignal(
+    INOUT   EX_EVENT*      Event
+    );
+
+//******************************************************************************
+// Function:     ExEventWaitForSignal
+// Description:  Waits for an event to be signaled. If the event is signaled it
+//               will place the thread in a waiting list and block its
+//               execution.
+// Returns:      void
+// Parameter:    INOUT EX_EVENT * Event
+//******************************************************************************
+void
+ExEventWaitForSignal(
+    INOUT   EX_EVENT*      Event
+    );
+\end{lstlisting}
+
+\subsubsection{Executive Timer}
+\label{sect:ExTimer}
+
+\begin{lstlisting}[caption={Timer functions},label={lst:TimerFunc}]
+//******************************************************************************
+// Function:     ExTimerInit
+// Description:  Initializes a timer to trigger to trigger at a specified time.
+//               Once this function returns, the timer can be waited by multiple
+//               threads at once. When the timer triggers - no matter its type -
+//               all the threads waiting on it must be woken up.
+// Returns:      STATUS
+// Parameter:    OUT PEX_TIMER Timer - Timer to initialize
+// Parameter:    IN EX_TIMER_TYPE Type - Defines the periodicity of the timer
+//               (one-shot or periodic) and defines the meaning of the 3rd
+//               parameter (if absolute or relative to the current time).
+// Parameter:    IN QWORD TimeUs
+//
+// Examples:
+// Initialize a one-shot timer to trigger after 1 second:
+// ExTimerInit(&timer, ExTimerTypeRelativeOnce, 1 * SEC_IN_US);
+//
+// Initialize a periodic timer to trigger every minute:
+// ExTimerInit(&timer, ExTimerTypeRleativePeriodic, 60 * SEC_IN_US);
+//
+// Initialize an absolute timer after the OS has run 2 minutes:
+// ExTimerInit(&timer, ExTimerTypeAbsolute, 120 * SEC_IN_US);
+//******************************************************************************
+STATUS
+ExTimerInit(
+    OUT     PEX_TIMER       Timer,
+    IN      EX_TIMER_TYPE   Type,
+    IN      QWORD           TimeUs
+    );
+
+//******************************************************************************
+// Function:     ExTimerStart
+// Description:  Starts the timer countdown. If the time has already elapsed all
+//               the waiting threads must be woken up.
+// Returns:      void
+// Parameter:    IN PEX_TIMER Timer
+//******************************************************************************
+void
+ExTimerStart(
+    IN      PEX_TIMER       Timer
+    );
+
+//******************************************************************************
+// Function:     ExTimerStop
+// Description:  Stops the timer countdown. All the threads waiting must be
+//               woken up.
+// Returns:      void
+// Parameter:    IN PEX_TIMER Timer
+//******************************************************************************
+void
+ExTimerStop(
+    IN      PEX_TIMER       Timer
+    );
+
+//******************************************************************************
+// Function:     ExTimerWait
+// Description:  Called by a thread to wait for the timer to trigger. If the
+//               timer already triggered and it's not periodic or if the timer
+//               is uninitialized this function must return instantly.
+// Returns:      void
+// Parameter:    INOUT PEX_TIMER Timer
+//******************************************************************************
+void
+ExTimerWait(
+    INOUT   PEX_TIMER       Timer
+    );
+
+//******************************************************************************
+// Function:     ExTimerUninit
+// Description:  Uninitialized a timer. It may not be used in the future without
+//               calling the ExTimerInit function. All threads waiting for the
+//               timer must be woken up.
+// Returns:      void
+// Parameter:    INOUT PEX_TIMER Timer
+//******************************************************************************
+void
+ExTimerUninit(
+    INOUT   PEX_TIMER       Timer
+    );
+
+//******************************************************************************
+// Function:     ExTimerCompareTimers
+// Description:  Utility function to compare to two timers.
+// Returns:      INT64 - if NEGATIVE => the first timers trigger time is earlier
+//                     - if 0 => the timers trigger time is equal
+//                     - if POSITIVE => the first timers trigger time is later
+// Parameter:    IN PEX_TIMER FirstElem
+// Parameter:    IN PEX_TIMER SecondElem
+//******************************************************************************
+INT64
+ExTimerCompareTimers(
+    IN      PEX_TIMER     FirstElem,
+    IN      PEX_TIMER     SecondElem
+    );
+\end{lstlisting}
+
+\subsection{Interlocked Operations}
+
+If you do a quick search in the project you will see there are over 50 calls to \_Interlocked
+functions. These functions are very useful when access to only a basic primitive type must be
+synchronized.
+
+One example would be \func{\_IomuUpdateSystemTime}: the scheduler clock tick occurs on each CPU,
+thus each one will want to increment the system uptime with a few microseconds. There is no reason
+for using a lock and causing unnecessary busy waiting when the hardware architecture can guarantee
+that we can atomically add a value to a memory address.
+
+\subsection{Disabling Interrupts}
+\label{sect:DisablingInt}
+
+\textbf{You should never have to use this mechanism for your project.} The technique and usefulness
+is described here only for completeness.
+
+Interrupts are disabled by primitive synchronization mechanisms, because their execution cannot be
+preempted because they are responsible of synchronizing different CPUs and once a primitive lock is
+taken on a CPU nothing else should be scheduled on that core until the lock is released.
+
+Another region where interrupts are disabled is during a thread switch, if a thread was interrupted
+while it was already in the process of yielding the CPU to another thread its state will become
+inconsistent and the whole system will surely crash.
+
+\section{Memory Management}
+\label{sect:MemManagement}
+
+One of the main responsibilities of an operating system is resource management. Well, one of the
+most important resources is the system's memory: either physical memory (RAM or device memory) or
+virtual memory.
+
+You should be familiar with the concepts of virtual memory and physical memory. If you're not sure
+what the difference is between these memory types you really should review a basic Operating Systems
+course and come back after.
+
+To put it very shortly, the physical memory (as the name suggests) is physical memory which either
+belongs to the RAM memories in the system or to other peripheral devices connected to the system
+(network cards, hard-disk controllers, USB controllers and so on).
+
+However, \projectname and other operating systems do not work directly with physical memory, these
+benefit from a mechanism implemented on the CPUs to offer a virtual address space (VAS) to software
+running on the system.
+
+Once the OS has setup the paging structures each time the CPU performs a memory access the address
+used to access this memory is a virtual address (VA). The paging structures will tell the CPU
+where the VA points to in physical memory and what are the access rights for which the memory can
+be accessed. If the VA is not mapped to a physical address (PA) or if the access rights are
+insufficient (i.e. a user-mode application wants to access a kernel-mode address or a kernel-mode
+application wants to write a read-only page) a page fault (\#PF) occurs.
+
+For more information on how \projectname handles \#PFs see \fullref{sect:PfHandling}, for more
+information on how paging works you can read \cite{intelSys} Chapter 4 - Paging.
+
+The following sections go in more detail on how physical, virtual and heap memory is managed.
+
+\subsection{Physical Memory Management}
+
+The physical memory manager (PMM) is responsible for managing the system's physical memory. This
+means determining upon system initialization what memory is available, marking memory as reserved
+when used and releasing it when it is no longer needed.
+
+All this functionality is exposed in \file{pmm.h}. Using the INT15H E820H memory map retrieved on
+system initialization the extents of physical memory is determined. This memory map is actually an
+array of ranges of memory found in the system - some of it being available while other being already
+reserved by the firmware or hardware devices.
+
+The PMM tracks the availability of physical frames in the \var{m\_pmmData.AllocationBitmap} bitmap.
+The size of the bitmap depends on the highest physical address available. Physical memory may 
+contain gaps so we cannot use the size of available memory to determine the size of the bitmap.
+Upon initialization all physical memory from 0 to the highest available is marked as reserved after
+which the INT15H E820H memory map is traversed and as available memory is found it is 'released'.
+
+Once the PMM finishes its initialization the OS can request memory using \func{PmmReserveMemory} or
+\func{PmmReserveMemoryEx} and free it using \func{PmmReleaseMemory}. You probably will \textbf{NOT}
+have to call these functions directly in any of your projects, we will see in the following sections
+how these functions are used.
+
+\subsection{Virtual Memory Management}
+\label{sect:VMM}
+
+The virtual memory manager (VMM) interface is exposed in \file{vmm.h}. This is the component
+responsible for managing the VAS of each process and for performing the VA to PA translations by
+working with the CPU's paging structures.
+
+Each VAS is managed through a VMM\_RESERVATION\_SPACE structure. Thus, each process has its own
+reservation space - pointed to by the \var{VaSpace} member of the PROCESS structure.
+
+When memory is allocated through the \func{VmmAllocRegion} or \func{VmmAllocRegionEx} functions a
+reservation for this memory is created in the VAS received as parameter or, if NULL, in the VAS of
+the current process.
+
+Each reservation is described by a VMM\_RESERVATION structure. This specifies the VA range reserved
+through the \var{StartVa} and \var{Size} fields, the access rights with which the memory was
+reserved, if the memory is uncacheable and if the memory is backed by a file it contains a pointer
+to a file object. The reservation also maintains a bitmap which describes which of the pages reserved
+are actually committed.
+
+You may ask what's the difference between the two: when a VA range is reserved that range may no
+longer be reserved by any other application. This is useful, for example, when you want to make sure
+you have a continuous region of virtual space, but you don't want to use it yet.
+
+However, when you want to start using the memory you reserved, you need to commit it - this can be
+done at a page level granularity, as an example you may reserve 4 pages of memory, but you may want 
+to commit only the first one and the last one.
+
+When memory is committed it is NOT also mapped to a physical address. This is because the VMM is
+lazy - see \fullref{sect:LazyMapping} for details. However, if you want to make sure that once you 
+commit a VA range it is mapped you can specify the \macro{VMM\_ALLOC\_TYPE\_NOT\_LAZY} flag
+to the allocate function.
+
+To release previously allocated memory call \func{VmmFreeRegion} or \func{VmmFreeRegionEx}. De-commiting
+memory can be done at the page level granularity, however releasing memory (i.e. freeing the 
+reservation completely) is an all or nothing operation: either you don't release the memory, either
+you release it all.
+
+NOTE: The VMM also provides functions for mapping and un-mapping memory, however you should not use
+these and use the MMU provided functions instead, see \fullref{sect:MMU}.
+
+The functions which effectively work with the CPU paging structures to setup VA to PA translation
+and to remove them are \func{VmmMapMemoryInternal} and \func{VmmUnmapMemoryEx}.
+
+\subsubsection{Lazy Mapping}
+\label{sect:LazyMapping}
+
+The way in which mappings from virtual to physical addresses are created can be either eager or lazy.
+In eager mapping, once the virtual address is allocated it's also mapped to a physical address. In
+contrast, when using lazy mapping, the VA may be allocated, but it will not be mapped to a physical
+address until it is actually needed, i.e. on first access to that region.
+
+Because the lazy mapping approach is much faster than the eager one it is commonly used in modern
+operating systems. Also, it is more practical not to reserve physical frames for virtual memory
+allocated because most of the time most of the memory space will not be used. For example
+\projectname allocates 5 GB of virtual memory for each user-mode process for their VAS management
+structures, but most processes will not use more than a few KB - some even less.
+
+Additionally, eager mapping may be impossible when allocating large ranges of virtual
+addresses, as an example we may want to allocate a VA range of 1TB - however most systems on which
+the OS will run certainly do not have 1TB of physical space - thus making eager mapping impossible
+without supporting swap space.
+
+In case lazy mapping is used and the 1TB range is allocated the physical frames are allocated only
+to the VAs actually accessed on a per-page granularity, i.e. if from the 1TB range we access only
+the first 100 bytes and the last 5 bytes we'll only have allocated 2 physical frames of memory.
+
+\projectname's default behavior is to lazy map virtual addresses, however if you need to make sure
+that once you allocated a VA range it is also backed by physical memory you can set the
+\macro{VMM\_ALLOC\_TYPE\_NOT\_LAZY} flag when allocating virtual memory.
+
+Okay, so how does the OS know that a virtual address is accessed for the first time and it needs to
+be assigned to a physical frame? Well, a \#PF will occur because the VA is not mapped and once the
+physical frame is reserved and the paging structures are updated to hold the VA to PA mapping
+execution of the faulting instruction is restarted. For more information about handling page faults,
+see \fullref{sect:PfHandling}.
+
+\subsection{Heap Management}
+
+A heap is a data structure for dynamically allocating memory. A heap is initialized by calling
+\func{HeapInitializeSystem} - this function uses the VMM exposed function \func{VmmAllocRegion} to
+reserve and commit a continuous region of virtual memory (remember - because of the lazy nature of
+the VMM this does not allocate physical frames only when that memory is actually accessed).
+
+Heap memory can then be allocated through calls to \func{HeapAllocatePoolWithTag} and freed by calls
+to \func{HeapFreePoolWithTag}. The heap is the entity responsible for managing the continous region
+of virtual memory.
+
+The reason why we need a heap and we don't just use the VMM allocation functions is because most of
+the time we won't need to allocate regions larger than a page size (VMM functions work at page size
+granularity) and we'd waste a lot of space for nothing: while the VAS is large and this wouldn't be
+a problem a physical frame will still be allocated for every allocation even if it is just one byte
+in size.
+
+Both the allocation and de-allocation functions require a DWORD Tag as a parameter - this is used
+only for extra-validation: when an allocation is done the heap allocation is marked with the
+requested tag, when memory is de-allocated the same tag must be used else an ASSERT will trigger.
+This reduces the probability of releasing the inappropriate memory due to code errors and is also a
+helpful debugging feature for tracking memory leaks, i.e. it is easier to pinpoint the component
+causing the leak.
+
+Another parameter received by the allocation function is the alignment: you may sometimes need to
+allocate memory which must follow a certain alignment rule.
+
+NOTE: For managing heap memory you should use the \func{ExAllocatePoolWithTag} and 
+\func{ExFreePoolWithTag} functions exposed in \file{ex.h}.
+
+\subsection{Memory Management Unit}
+\label{sect:MMU}
+
+The memory management unit (MMU) is responsible for initializing and coordinating the PMM, VMM and
+the heaps. This unit is responsible for creating the paging structures which will be used by the
+system process, for performing the switch to these structures and for mapping and reserving the
+whole kernel memory.
+
+\subsubsection{Interface}
+The MMU is also responsible for aggregating the functionality exposed by the PMM, VMM and heap for
+easier use and convenience. Here is a summary of what the MMU provides (see \file{mmu.h}):
+\begin{itemize}
+	\item Support for performing PA to VA translations through the \func{MmuMapMemoryEx} and
+\func{MmuUnmapMemoryEx} functions.
+
+	\item Support for retrieving the VA to PA translation either in the context of the current
+process or by using different paging structures: \func{MmuGetPhysicalAddress} and the Ex variant.
+
+	\item Support for validating if a buffer is valid and the process has the required access rights
+for the operation desired: \func{MmuIsBufferValid}.
+
+	\item Support for mapping a user-mode VA to a kernel-mode VA through the 
+\func{MmuGetSystemVirtualAddressForUserBuffer} function.
+
+	\item Support for loading an executable in memory and mapping it in the context of a process:
+\func{MmuLoadPe}.
+\end{itemize}
+
+NOTE: For managing heap memory you should use the \func{ExAllocatePoolWithTag} and 
+\func{ExFreePoolWithTag} functions exposed in \file{ex.h}.
+
+\subsection{Page-fault handling}
+\label{sect:PfHandling}
+
+When a page fault occurs the internal exception handler will call \func{MmuSolvePageFault} passing
+the faulting address (read from CR2) and the error code (pushed on the stack by the CPU) as
+parameters.
+
+This function in turns determines the access rights requested on the faulting address from the error
+code, determines the paging structures which must be used (the global kernel ones or the per user
+ones) from the access type (user-mode or kernel mode) and calls \func{VmmSolvePageFault}.
+
+This later function checks to see if user-mode access was requested on a kernel page or if a kernel
+mode access was requested on a user page and if any of these hold true the function fails to solve
+the \#PF.
+
+The next step is to check if the faulting address has a reservation allocated and if the memory
+accessed is committed, this is done by calling \func{VmReservationCanAddressBeAccessed}. If these
+checks pass then the VA should be mapped to a PA so \projectname will reserve a frame of
+physical memory through \func{PmmReserveMemory}.
+
+The next step is to actually map the VA to the newly acquired PA through \func{MmuMapMemoryInternal}.
+If this reservation is backed by a file then the contents of the file from the proper offset is read
+in memory by calling \func{IoReadFile}.
+
+If the file was not backed by a file, or the contents of the file did not occupy a whole page the
+remaining memory is set to 0.
+
+If all these steps happen successfully then the exception handler will return and without any
+modification on any of the processor's state before the exception the instruction which caused the
+\#PF will be re-executed and the memory access will now complete successfully.
+
+\section{Virtual Addresses}
+\label{sect:VirtAddr}
+
+A 64-bit virtual addresses can be divided into 6 sections as illustrated in \fullref{fig:VaToPa}.
+
+\begin{verbatim}
+63             48 47     39 38     30 29     21 20     12 11          0
++----------------+---------+---------+---------+---------+------------+
+| Unused         |  PML4   | Dir Ptr |   Dir   |  Table  |   Offset   |
++----------------+---------+---------+---------+---------+------------+
+                             Virtual Address
+\end{verbatim}
+
+Because of the way 64-bit mode works, accesses to virtual addresses require the 47th bit to be
+reflected in bits 63:48, as a result these are useless for determining the table to be used for
+address translation.
+
+The next 4 pairs of 9 bits (PML4, Dir Ptr, Dir, Table) each give us an index inside a table which
+takes us to an entry which holds the physical address of the next table, or in the case of the last
+9 bits it gives us the final physical address where the virtual address is mapped.
+
+The final 12 bits give us the offset inside the physical frame.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.85]{LinearToPhysical}
+		\caption{Linear-Address Translation - \cite{intelSys}}
+	\label{fig:VaToPa}
+\end{figure}
+
+\projectname offers the following macros and functions for working with virtual addresses:
+
+\begin{itemize}
+	\item \func{VmmGetPhysicalAddressEx}: Retrieves the physical address for a virtual address. In
+case the virtual address is not mapped the returned value is NULL. This function can also be used
+to retrieve and reset the accessed and dirty bits, for details on this see \fullref{sect:ADBits}.
+
+	\item \func{MmuMapMemoryEx}: maps a physical address range into the virtual space of a process 
+or only into the virtual space of the kernel. The caller can specify the access rights requested for
+the virtual address and the cacheability. The function returns the virtual mapping allocated for the
+requested physical address.
+
+	\item \func{MmuUnmapMemoryEx}: unmaps a virtual address from the address space of a process or
+of the kernel.
+
+	\item \func{MmuIsBufferValid}: checks if a virtual address range can be accessed from the
+address space of a process with certain access rights.
+
+	\item \func{\_VmIsKernelRange}: heuristically checks if an address looks like a kernel one, i.e.
+it checks if bit 47 is set.
+
+	\item \func{MmuGetSystemVirtualAddressForUserBuffer}: maps a virtual range of addresses from the
+virtual address space of the specified process to a kernel virtual address range. The kernel access
+rights can also be specified.
+
+	\item \func{MmuFreeSystemVirtualAddressForUserBuffer}: frees a previously mapped user virtual
+range.
+
+	\item \var{gVirtualToPhysicalOffset}: the first valid kernel virtual address.
+
+	\item \macro{PAGE\_SIZE}: defines the size of a page, 4 KiB.
+
+\end{itemize}
+
+The x86 doesn't provide any way to directly access memory given a physical address. This ability is
+often necessary in an operating system kernel, for example, when working with the actual paging
+structures. \projectname works around it by mapping certain regions of kernel virtual memory
+one-to-one to physical memory. That is, in the case of these regions of memory the virtual address
+\var{gVirtualToPhysicalOffset} accesses physical address 0, virtual address \var{gVirtualToPhysicalOffset}
++ 0x1234 accesses physical address 0x1234, and so on up. Thus, adding \var{gVirtualToPhysicalOffset}
+to a physical address obtains a kernel virtual address that accesses that address; conversely,
+subtracting \var{gVirtualToPhysicalOffset} from a kernel virtual address obtains the corresponding
+physical address. Header \file{HAL9000.h} provides a pair of macros to do these translations:
+\begin{itemize}
+	\item \macro{VA2PA}: Returns the virtual address corresponding to a physical address.
+	\item \macro{PA2VA}: Returns the physical address corresponding to a virtual address.
+\end{itemize}
+
+\textbf{NOTE: do not use these macros to perform the translations for any kind of addresses. As
+previously mentioned these are only valid for certain memory regions, for the whole 'list', see the
+ASCII diagram above \func{MmuInitSystem}.}
+
+\section{Paging Tables}
+\label{sect:PageTables}
+
+There is a lot to talk about paging, however the Intel manuals does this better than we could ever
+describe them here, so have a look over \cite{intelSys} sections 4.5 "IA-32e Paging", 4.6 "Access
+Rights" and 4.8 "Accessed and Dirty Bits". This section only provides a very brief summary of the
+interface provided by \projectname to interact with the paging structures.
+
+\subsection{Creation, Destruction and Activation}
+
+These functions create, destroy, and activate page tables. The base \projectname code already calls
+these functions where necessary, so it should not be necessary to call them yourself. However, we
+advise you to have a look at where they're used:
+
+\begin{itemize}
+	\item \func{\_MmuCreatePagingTables}: Creates a new base table (PML4), each process has a its
+own such table.  The new page table contains \projectname's normal kernel virtual page mappings,
+but no user virtual mappings.
+
+	\item \func{\_MmuDestroyPagingTables}: Destroys a paging structure freeing all its used user
+memory.
+
+	\item \func{MmuChangeProcessSpace}: Switches the currently used paging structures for a new
+set of paging structures. Called on process switches.
+\end{itemize}
+
+
+\subsection{Inspection and Updates}
+
+These functions examine or update the mappings from pages to frames encapsulated by a page table.
+They work on both active and inactive page tables (that is, those for running and suspended
+processes), flushing the TLB as necessary.
+
+Again, these functions are already used by \projectname and provided at a higher level interface so
+you do not need to call them directly, however, you should have a look at them.
+
+\begin{itemize}
+	\item \func{PteMap}: Creates an entry in a page table to a physical address. The caller can also
+specify the access rights and privilege level.
+
+	\item \func{PteUnmap}: Zeroes a page entry thus marking it as not present.
+
+	\item \func{PteIsPresent}: Checks if a page is present or not.
+
+	\item \func{PteGetPhysicalAddress}: Returns the physical address mapped by the paging table
+entry.
+\end{itemize}
+
+All of these functions work indifferently of the hierarchy level of the paging structure.
+
+\subsection{Accessed and Dirty Bits}
+\label{sect:ADBits}
+
+x86 hardware provides some assistance for implementing page replacement algorithms, through a pair
+of bits in the page table entry (PTE) for each page. On any read or write to a page, the CPU sets
+the accessed bit to 1 in the page’s PTE, and on any write, the CPU sets the dirty bit to 1. The CPU
+never resets these bits to 0, but the OS may do so.
+
+You need to be aware of aliases, that is, two (or more) pages that refer to the same frame. When an
+aliased frame is accessed, the accessed and dirty bits are updated in only one page table entry (the
+one for the page used for access). The accessed and dirty bits for the other aliases are not updated.
+
+When you implement page sharing you must manage these aliases somehow. For example, your code could
+check and update the accessed and dirty bits for both addresses.
+
+Using \func{VmmGetPhysicalAddressEx} both the accessed and dirty bits can be retrieved for a virtual
+address from its corresponding page table entry. This is done by setting the corresponding output
+pointer to a non-NULL address where to place the value. This function can be found in \file{vmm.h}.
+\textbf{NOTE: When retrieving the value of the accessed or dirty bit the corresponding bit is
+cleared from the paging table by \projectname.}
+
+\section{List Structures}
+\label{sect:Lists}
+
+Doubly linked lists are ubiquitous in \projectname and you should learn how to use them before
+working on the project. These lists are represented through LIST\_ENTRY structures. Their interface
+is exposed in \file{list.h}. You do not need to learn how they work internally, in this section
+we'll describe the functions exposed to work with lists. However, if you're curious on the
+implementation  you can go to the header file and read the comments at the start of the file.
+
+For those familiar with Microsoft's LIST\_ENTRY implementation this section can be skipped because
+\projectname's implementation is almost identical.
+
+Each structure that is a potential list element must embed a LIST\_ENTRY member. All of the list
+functions operate on these LIST\_ENTRY members. The CONTAINING\_RECORD macro allows conversion from
+a LIST\_ENTRY back to a structure object that contains it.
+
+The head of the list is also represented through a LIST\_ENTRY, however this must not be embedded in
+any structure.
+
+An example on how to perform basic operations on a list is shown in \fullref{lst:ListExample} and is
+described next.
+
+Each structure can be in as many lists at once as LIST\_ENTRY members it has, the THREAD structure
+has 3 such list entries because it is at the same time in the all threads list, in the ready/block
+list and in the process list. In our example MY\_DATA has a single ListEntry thus can belong to
+only one list at once.
+
+On line 15 the list head is initialized, this must be done only ONCE and must be done BEFORE any
+entry is inserted into the list.
+
+On line 21 a new element is inserted at the back of the list, \func{InsertHeadList} is available for
+insertion in the front of the list and \func{InsertOrderedList} for inserting the element in the
+list following a certain order.
+
+On line 23 we check to see if the list is empty or not.
+
+On line 26 an element is removed from the head of the list, if we want to remove an element from its
+back we can use \func{RemoveTailList}. NOTE: it wasn't necessary to check if the list is empty
+before removing an element from it, if we want to remove an element from an empty list we'll
+receive a pointer to the head of the list which can be easily validated.
+
+A search in the list can be done using \func{ListSearchForElement} and for executing a function for
+each list element \func{ForEachElementExecute} can be used.
+
+Real usage examples can be found throughout the \projectname's code, especially in \file{thread.c},
+\file{process.c}, \file{heap.c}, \file{iomu.c}.
+
+\begin{lstlisting}[caption={List Usage Example},label={lst:ListExample},numbers=left]
+// list head
+LIST_ENTRY gGlobalList;
+
+typedef struct _MY_DATA
+{
+	...
+	// MY_DATA elements will link in the global list through the ListEntry field
+	LIST_ENTRY		ListEntry;
+	...
+	BYTE			Data;
+} MY_DATA, *PMY_DATA;
+
+void SomeFunction(void)
+{
+	InitializeListHead(&gGlobalList);
+
+	PMY_DATA pData = ExAllocatePoolWithTag(0, sizeof(MY_DATA), HEAP_TEST_TAG, 0);
+	ASSERT(pData != NULL);
+
+	// Inserts the data element at the end of the list
+	InsertTailList(&gGlobalList, &pData->ListEntry);
+
+	if (!IsListEmpty(&gGlobalList)
+	{
+		// Removes the first element from the list
+		PLIST_ENTRY pListEntry = RemoveHeadList(&gGlobalList);
+
+		// Retrieves a pointer to the beginning of the structure
+		pData = CONTAINING_RECORD(pListEntry, MY_DATA, ListEntry);
+	}
+}
+\end{lstlisting}
+
+\section{Hash Table}
+
+\projectname provides a basic implementation of a hash table through the HASH\_TABLE structure.
+Functions to insert, lookup, remove or iterate through elements are provided, as well as a couple of
+generic hashing functions for keys which have a size of less than 8 bytes.
+
+The implementation solves collisions through chaining, thus if multiple elements hash to the same
+key they will be placed in a doubly linked list. The only dynamically allocated memory needed is
+when initializing the hash table, this is due to the fact that a doubly linked list is needed for
+each unique key and the number of keys in a hash table is configurable and passed as a parameter
+when pre-initializing the hash table.
+
+The way we work with the hash elements is similar to the way we work with doubly linked list entries,
+however instead of using LIST\_ENTRY fields we will use HASH\_ENTRY fields. In this section we will
+illustrate how we can use a hash table, also, if you go to \file{hash\_table.h} you will
+see some usage examples as well.
+
+We will discus the operation in three stages: initializing the hash table, using the hash table and
+destroying it.
+
+An example of how to initialize a hash table is provided in \fullref{lst:HashInitEg}:
+\begin{itemize}
+	\item On lines 6-14 we have the declaration of the MY\_PROCESS structure, because it holds a
+	field of type HASH\_ENTRY it can be inserted in a hash table.
+	
+	\item On line 23 we see a call to \func{HashTablePreInit}: here we specify the number of unique
+	keys we want the hash table to hold and the size of the key. The number of unique keys must be
+	known because the size allocated for the internal hash table data depends on this: for each
+	unique key a doubly linked list header is required to hold the element chain. The size of the
+	key is required by the hashing functions.
+	
+	\item On line 30 we see a call to \func{HashTableInit} which provides the newly allocated
+	memory for the hash table internal structure, the hashing function and the difference in bytes
+	between the field used as the key (in our case \textit{Id}) and the field used for chaining the
+	element in the hash table (in our case \textit{HashEntry}).
+	
+	\item After the hash table has been initialized it can now be populated with elements.
+\end{itemize}
+
+\begin{lstlisting}[caption={Hash Initialization Example},label={lst:HashInitEg},numbers=left]
+#define NO_OF_KEYS		8
+
+// global hash table of processes
+HASH_TABLE gHashTable;
+
+typedef struct _MY_PROCESS
+{
+	PID 			Id;
+	...
+	// MY_PROCESS elements will link in the global list through the HashEntry field
+	HASH_ENTRY		HashEntry;
+	...
+	BYTE			Data;
+} MY_PROCESS, *PMY_PROCESS;
+
+void InitProcessHashTable(void)
+{
+	// Pre-initialize the hash table, specify the maximum number of keys we want it to 
+	// have and the size of the key. This function returns the size in bytes required
+	// for its internal HASH_TABLE_DATA structure, we will need to allocate this
+	// memory dynamically.
+	DWORD requiredHashSize = HashTablePreinit(&gHashTable, NO_OF_KEYS, sizeof(PID));
+	
+	PHASH_TABLE_DATA pUnknown = ExAllocatePoolWithTag(0, requiredHashSize, HEAP_TEST_TAG, 0);
+	ASSERT(pUnknown != NULL);
+	
+	// Initialize the hash table to use the HashFuncGenericIncremental hashing
+	// function and specify the difference in bytes between the offset to the Key 
+	// field and the offset to the HASH_ENTRY field
+	HashTableInit(&gHashTable, 
+		      pUnknown, 
+		      HashFuncGenericIncremental, 
+		      FIELD_OFFSET(MY_PROCESS, Id) - FIELD_OFFSET(MY_PROCESS, HashEntry));
+}
+\end{lstlisting}
+
+The code in \fullref{lst:HashUsageEg} provides some usage examples:
+\begin{itemize}
+	\item On line 7 an initialized MY\_PROCESS structure is inserted into the hash table. Because
+	the size of the key, the hashing function and the offset between the HASH\_ENTRY and the key
+	are already known the only parameters required by this function are the hash table and the
+	HASH\_ENTRY to insert.
+	
+	\item On line 10 the previously allocated element is removed. 
+	
+	\textbf{NOTE: while it is possible
+	to simply perform a RemoveEntryList(\&pProcess->HashEntry) to remove the entry from the hash table
+	it is not advisable to do so, the hash table maintains a count of elements and it cannot maintain
+	a proper count if the explicit hash functions are not used. Also, in the future the HASH\_ENTRY
+	structure may not be defined as a LIST\_ENTRY.}
+	
+	\item On line 15 the element whose key is 0x4 is removed from the hash table. If the element
+	was not present a NULL pointer is returned.
+	
+	\item On line 23 a check is made to make sure that the element whose key is 0x4 is no longer
+	present in the hash table.
+	
+	\item On line 25 the number of elements in the hash table is logged.
+	
+	\item On lines 29-36 an iterator is initialized and the whole hash table is traversed element by
+	element. The HASH\_TABLE\_ITERATOR structure always maintains the position of the next element
+	in the hash table, that's why while traversing the hash table with an iterator we can always
+	remove the current element and continue the iteration. Once there are no more elements in the
+	hash table \func{HashTableIteratorNext} returns NULL.
+\end{itemize}
+
+\begin{lstlisting}[caption={Hash Usage Example},label={lst:HashUsageEg},numbers=left]
+void UsageFunction(void)
+{
+	PMY_PROCESS pProcess = ExAllocatePoolWithTag(0, sizeof(MY_PROCESS), HEAP_TEST_TAG, 0);
+	// ... Initialize process structure ...
+
+	// Insert the new element into the hash table
+	HashTableInsert(&gHashTable, &pProcess->HashEntry);
+	
+	// Remove previously added element
+	HashTableRemoveEntry(&pHashTable, &pProcess->HashEntry);
+	
+	// Remove a process by searching for a certain ID
+	PID idToRemove = 0x4;
+	
+	PHASH_ENTRY pEntry = HashTableRemove(&gHashTable, &idToRemove);
+	if (pEntry != NULL)
+	{
+		PMY_PROCESS pProcess = CONTAINING_RECORD(pEntry, MY_PROCESS, HASH_ENTRY);
+		// ... work with the process structure ...
+	}
+	
+	// Check if the element is still in the list
+	ASSERT(HashTableLookup(&gHashTable, &idToRemove) == NULL);
+	
+	LOG("Number of elements in the hash table is \%u\n", HashTableSize(&gHashTable));
+	
+	// Iterate through all the elements of the list
+	// The iterator maintains the current traversal state within the hash table
+	HASH_TABLE_ITERATOR it;
+	
+	HashTableIteratorInit(&gHashTable, &it);
+	
+	while ((pEntry = HashTableIteratorNext(&it) != NULL)
+	{
+		// process the entry
+	}
+}
+\end{lstlisting}
+
+Finally, the code listed in \fullref{lst:HashUsageEg} provides an example of how to destroy the
+hash table:
+\begin{itemize}
+	\item On line 19 we see the call which will empty the hash table and call the provided
+	\func{ProcessFreeFunc} for each element in the hash table.
+	
+	\item On lines 1-10 we see the function which is called for each element removed from the hash
+	table when \func{HashTableClear} is called. The Object parameter will point to the HASH\_ENTRY
+	field from the structure, thus to get to the actual element we will use the CONTAINING\_RECORD
+	macro. Once we have the element we can free its memory.
+	
+	\item On line 22 we see the call to free the memory which was allocated for the hash table
+	internal implementation: it is no longer needed.
+\end{itemize}
+
+\begin{lstlisting}[caption={Hash Destruction Example},label={lst:HashDestEg},numbers=left]
+void
+(_cdecl ProcessFreeFunc)(
+    IN      PVOID       Object,
+    IN_OPT  PVOID       Context
+    )
+{
+	PMY_PROCESS pProcess = CONTAINING_RECORD(Object, MY_PROCESS, HashEntry);
+	
+	ExFreePoolWithTag(pProcess, HEAP_TEST_TAG);
+}
+
+void DestroyProcessHashTable(void)
+{
+	PVOID pUnknown = gHashTable->TableData;
+
+	// Free all the elements in the hash table, the ProcessFreeFunc function
+	// will be called for each element, the pointer received as the first
+	// parameter will point to the HASH_ENTRY field in MY_PROCESS
+	HashTableClear(&gHashTable, ProcessFreeFunc, NULL);
+
+	// Free the hash table internal memory allocated at initialization
+	ExFreePoolWithTag(pUnknown, HEAP_TEST_TAG);
+}
+\end{lstlisting}
+
+\section{Timers}
+
+Modern x86 systems possess a diverse range of hardware timers which can be programmed to achieve different
+functionalities:
+\begin{itemize}
+	\item High-precision timers: HPET and LAPIC.
+	\item General usage timers: RTC, PIT, ACPI timer.
+\end{itemize}
+
+All the timers enumerated except the LAPIC timer are system-wide, i.e. there is only one hardware timer available on a
+given system. The LAPIC timer is available on a per-CPU basis.
+
+\projectname currently uses only the PIT and RTC timers. The PIT is used for dispatching the scheduler, while the RTC is
+used for updating the system time. Also, code for programming the LAPIC timer is already implemented and can be used
+without modification.
+
+Because \projectname does not interract with the HPET (High Precision Event Timer) or the ACPI (Advanced Configuration
+and Power Interface) timer at all these are not described here.
+
+\subsection{PIT Timer}
+
+The PIT (Programmable Interval Timer) has 3 programmable timers:
+\begin{enumerate}
+	\item Channel 0: this is used by \projectname for the scheduler interrupt. It is setup as a periodic interrupt to 
+trigger every \macro{SCHEDULER\_TIMER\_INTERRUPT\_TIME\_US} $\mu$s (the default value is 40ms).
+
+	\item Channel 1: unused.
+
+	\item Channel 2: used by \func{PitSleep} to wait for a certain number of Microseconds to pass. This is not
+programmed to generate an interrupt, it continously polls the PIT to determine if the timer has expired or not.
+\end{enumerate}
+
+The timer is initalized in \func{\_IomuSetupPit} and the interrupt registered is \func{\_IomuSystemTickInterrupt}.
+
+Further information is available \cite{intelPch} Chapter 12.3 Timer I/O Registers and 
+\href{http://wiki.osdev.org/Programmable_Interval_Timer}{OS dev - PIT}.
+
+\subsection{RTC Timer}
+
+\projectname uses the RTC (Real Time Clock) timer to update the system time, i.e. the one displayed in the upper right-hand
+corner of the screen. It is programmed to trigger an interrupt only when the BIOS CMOS memory clock updates its second 
+counter, i.e. when a second passes.
+
+The interrupt function is \func{OsInfoTimeUpdateIsr}. It is registered in \func{\_IomuSetupRtc} - this function is also
+responsible of actually programming the hardware timer to trigger only on timer updates. The RTC can also be programmed
+to generate two additional interrupts:
+\begin{enumerate}
+	\item Periodic interrupts: the interrupt triggers each timer the timer period expires. The range of interrupt
+frequencies is from 122 $\mu$s to 500 ms.
+
+	\item Alarm interrupt: the interrupt is generated when the system time reaches a software programmed value
+(hour:minute:second).
+\end{enumerate}
+
+More information about the RTC can be found in \cite{intelPch} Chapter 12.6 Real Time Clock Registers and 
+\href{http://wiki.osdev.org/RTC}{OS dev - RTC}..
+
+\subsection{LAPIC Timer}
+
+The LAPIC (Local Advanced Programmable Interrupt Controller) timer is a hardware timer implemented on each CPU core.
+It is currently not used by \projectname, but the following function is available for programming it:
+\begin{lstlisting}[caption={LAPIC Timer},label={lst:LapicTimer}]
+//******************************************************************************
+// Function:     LapicSystemSetTimer
+// Description:  Enables the LAPIC timer on the current CPU to trigger every
+//               Microseconds ms. If the argument is 0 the timer is stopped.
+// Parameter:    IN DWORD Microseconds - Trigger period in microseconds.
+// Parameter:    OUT_PTR PTHREAD * Thread
+// NOTE:         This only programs the LAPIC timer on the current CPU.
+//******************************************************************************
+void
+LapicSystemSetTimer(
+    IN      DWORD                           Microseconds
+    );
+\end{lstlisting}
+
+If the argument passed is 0 the timer is stopped, else it is enabled in periodic mode to trigger every \var{Microseconds}.
+When the interrupt triggers \func{\_SmpApicTimerIsr} will be executed.
+
+More information about the LAPIC timer can be found in \cite{intelSys} Chapter 10.5.4 APIC Timer and
+\href{http://wiki.osdev.org/APIC_timer}{OS dev - LAPIC Timer}.
+
+\chapter{Debugging Tools}
+\label{chap:Debugging}
+
+\projectname is a complex project and sometimes when you'll make a change in the code you'll see
+that what's actually happening in the system differs from what you were expecting.
+
+Unfortunately, \projectname doesn't have support for a debugger, YET! We wish to write one for the
+second iteration of the project.
+
+However, in the author's opinion sufficient tools are available to solve any bugs which may arise
+in the code.
+
+The following sections will go through the different techniques available for debugging code and
+detecting errors:
+\begin{itemize}
+	\item Logging: simply write messages logging the data which interests you, usually when there
+are bugs the information logged will differ from what you were expecting.
+
+	\item Asserts: validate all assumptions. Even if you know that the sun rises in the east or that
+only threads in the dying state can be destroyed make sure those conditions stand.
+
+	\item Disassembly: follow the assembly instructions which caused your system to crash and 
+determine the call stack.
+
+	\item Halt debugging: when you're desperate and the system reboots in an infinite loop place
+some HLT instructions in the code to diagnose the problem.
+\end{itemize}
+
+\section{Logging}
+
+The easiest thing to do if you don't understand something is to log it. There are different logging
+levels which you may use depending on the importance of the logged information: trace, info, warning
+and error.
+
+You can setup the logging level you want to use when calling the \func{LogSystemInit} for
+initializing the logging system or \func{LogSetLevel} for changing the log level any time.
+
+For a log message to be shown, its log level must be greater than or equal to the logging level set,
+ i.e. if currently the system logging level is LogLevelWarning then only warning and error messages
+will be displayed and info and trace messages will be ignored.
+
+Also, there are different components which may log trace messages, and you may activate/deactivate
+logging trace messages based on the component logging them. This can be set, as logging level, 
+either when initializing the logging system or by calling \func{LogSetTracedComponents} at a later
+time. For example, if you want to log all trace messages only from the generic and exception
+component you would either do as shown in \fullref{lst:LoggingInit} or as shown in
+\fullref{lst:LoggingChange} after logging has been initialized.
+
+\begin{lstlisting}[caption={Logging Init},label={lst:LoggingInit}]
+    LogSystemInit(LogLevelTrace,
+                  LogComponentGeneric | LogComponentException,
+                  TRUE
+                  );
+\end{lstlisting}
+
+\begin{lstlisting}[caption={Logging Change},label={lst:LoggingChange}]
+	LogSetTracedComponents(LogComponentGeneric | LogComponentException);
+\end{lstlisting}
+
+All of the logging functions and the definitions can be found in the \file{log.h} file. At first,
+things may seem confusing, but here's the basic things that you need to know:
+
+\begin{itemize}
+	\item \func{LOG} If you want to log a simple message.
+
+	\item \func{LOGP} If you want to log a message plus the CPU id from which it is logged.
+
+	\item \func{LOGL} If you want to log a message plus the file and line form which the log
+occurs.
+
+	\item \func{LOGTPL} If you want to log a message plus the thread, CPU, file and line from which
+the log occurs.
+
+	\item \func{LOG\_WARNING} If you want to log warnings, these should be unexepected
+things from which the function can recover.
+
+	\item \func{LOG\_ERROR} If you want to log errors, these should be used if the errors cannot be
+handled and the function emitting the message failed execution.
+
+	\item \func{LOG\_TRACE\_THREAD} If you want to log a message on behalf of the threading
+component and include the CPU id and file and line from which the log occurred.
+\end{itemize}
+
+Other logging mechanism exist for each component: \func{LOG\_TRACE\_*} functions. Be careful when
+logging, not to log too much in functions called often, this can slow down the system considerably
+until the point that close to 0 progress is made.
+
+Logging is safe to be used in both normal executing code and in interrupt handlers because it uses
+primitive locks for synchronization. However, you cannot log messages in the logging functions, this
+would cause infinite recursion and the OS will crash due to a \#PF caused by a stack overflow which
+cannot be solved.
+
+If you want to dump a raw memory region to find out what's there you can use the \func{DumpMemory}
+function or you can use more specialized functions available in the \file{dmp\_*.h} files which
+display information about a specific component/device/entity in a more organized way. As an example
+see \func{DumpInterruptStack} or \func{DumpProcess}.
+
+\section{Asserts}
+
+Another mechanism to make sure everything works as expected is to use asserts. The code is already
+full of them (1000+ instances). \textbf{\color{red}DO NOT REMOVE ANY OF THE EXISTING ASSERTS!}
+
+When you place an assert in the code you set as the condition the thing you're expecting to be true
+a.k.a an invariant, if the condition does not hold once execution reaches that point the current CPU
+ will stop execution, notify the other CPUs that a fatal error has occurred and log the condition
+which failed the assert.
+
+As an example, lets go to the \func{\_ThreadSchedule} function and have a look at one of its asserts
+: ASSERT(INTR\_OFF == CpuIntrGetState()). When execution will reach this point the condition will
+be verified to see if it's true, i.e. interrupts are disabled when entering the function, if this is
+not the case and for some reason the interrupts are enabled execution will stop and you will see the
+following message in the log file:
+
+\begin{verbatim}
+[ERROR][hal_assert.c][29][CPU:00]Kernel panic!
+[ERROR][hal_assert.c][31][CPU:00]Thread: [main-00]
+[ERROR][hal_assert.c][33][CPU:00][ASSERT][thread.c][1029]Condition: ((0 == 
+CpuIntrGetState())) failed
+\end{verbatim}
+
+One can easily see that 0 == CpuIntrGetState() didn't hold true and you can see that the check is
+happening in the \file{thread.c} file at line 1029.
+
+\projectname is full of such asserts to make sure the functions are called correctly and if some
+code changes all the invariants are still respected. This project is a large one and the work effort
+invested in it spans almost a year and without these asserts it's very easy to forget how a code
+change in a component can affect other components and alter the system's behavior. This is why
+asserts are used and this is why you should not remove any of them.
+
+Each time you work on your project you should be asking yourself, what conditions have to hold for
+the function to work properly? These conditions should validate the state of the system and, if the
+function is one which can be only be used by other OS components, the parameters. You should NOT
+assert the validity of parameters received in a system call because these are user provided
+parameters, but you should assert if your \func{ThreadSetPriority} function receives an invalid
+priority because this function can only be called by other TRUSTED OS components.
+
+To continue the example when writing the \func{ThreadSetPriority} function you should assert that
+the thread priority is a valid one and that \func{GetCurrentThread} returns a valid non-NULL thread.
+
+\section{Dissassembly}
+
+Sometimes, when you make code changes some errors may occur which are not caught by asserts or any
+other type of validation. These errors may lead to exceptions on the processor which will cause the
+system to crash.
+
+In case such an event occurs \projectname will log the interrupt stack and the processor registers
+when the exception took place. The only way to see where the operation took place is to disassemble
+the instructions near the RIP which caused the exception. We recommend using IDA \cite{ida} for this.
+
+Most of the time, it is easy to pinpoint the function and the exact place where the exception took
+place once we look at the disassembled code. Either because there is a log function close to the
+faulting RIP which also logs the file and line or we can easily determine the function to which the
+instruction belongs to.
+
+We will now look into an example on how to diagnose a \#PF using the IDA dissasembler.
+
+We made some changes to the code and now \projectname crashes due to an un-handled page fault. The
+last lines of the log file looks like this:
+\begin{verbatim}
+[thread.c][184][CPU:00]_ThreadInit succeeded
+[ERROR][isr.c][149]Could not handle exception 0xE [#PF - Page-Fault Exception]
+
+Interrupt stack:
+Error code: 0x0
+RIP: 0xFFFF800001032CFB
+CS: 0x18
+RFLAGS: 0x10086
+RSP: 0xFFFF85014365E850
+SS: 0x20
+
+Control registers:
+CR0: 0x80010031
+CR2: 0x20
+CR3: 0x1140000
+CR4: 0x100020
+CR8: 0x0
+
+Processor State:
+RAX: 0x0
+RCX: 0xC0000100
+RDX: 0xFFFF850100000000
+RBX: 0x80800
+RSP: 0xCCCCCCCCCCCCCCCC
+RBP: 0xFFFF800001006125
+RSI: 0x408
+RDI: 0xFFFF85014365E860
+R8: 0xFFFF85014365E8B8
+R9: 0xFFFF85014365E658
+R10: 0xFFFF800001118000
+R11: 0x1
+R12: 0x0
+R13: 0x0
+R14: 0x0
+R15: 0x0
+RIP: 0xCCCCCCCCCCCCCCCC
+Rflags: 0xCCCCCCCCCCCCCCCC
+Faulting stack data:
+[0xFFFF85014365E850]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E858]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E860]: 0xFFFF85014365E918
+[0xFFFF85014365E868]: 0xFFFF80000103330F
+[0xFFFF85014365E870]: 0x0
+[0xFFFF85014365E878]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E880]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E888]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E890]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E898]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8A0]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8A8]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8B0]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8B8]: 0x80800000306C3
+[0xFFFF85014365E8C0]: 0x1FABFBFFF7FA3223
+[0xFFFF85014365E8C8]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8D0]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8D8]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8E0]: 0xCCCCCCCCCCCCCC00
+[0xFFFF85014365E8E8]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8F0]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E8F8]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E900]: 0x4110860067F20473
+[0xFFFF85014365E908]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E910]: 0xCCCCCCCCCCCCCCCC
+[0xFFFF85014365E918]: 0xFFFF85014365EBB8
+[0xFFFF85014365E920]: 0x80800
+[0xFFFF85014365E928]: 0xFFFF80000106AE90
+[0xFFFF85014365E930]: 0x0
+[0xFFFF85014365E938]: 0xFFFF850140000390
+[0xFFFF85014365E940]: 0xFFFF8000010EECA8
+[0xFFFF85014365E948]: 0xFFFF8000010EEC9C
+[ERROR][hal_assert.c][29][CPU:00]Kernel panic!
+[ERROR][hal_assert.c][31][CPU:00]Thread: [main-00]
+[ERROR][hal_assert.c][33][CPU:00][ASSERT][isr.c][152]Condition: (exceptionHandled)
+failed
+Exception 0xE was not handled
+\end{verbatim}
+
+We can clearly see the value of the faulting RIP as being 0xFFFF800001032CFB and the faulting address
+0x20 (in CR2). When you see these low valued addresses you can be sure that they are caused by a
+NULL pointer dereference, i.e. a field at offset 0x20 from a structure is accessed through a NULL
+pointer.
+
+We can now open the binary file with IDA and dissasemble the code.
+
+\textbf{NOTE: the .pdb file should be in the same folder as the binary file when you open it with
+ IDA. Because of this, our recommendation is to load the \file{HAL9000.bin} file from the bin folder.}
+
+\textbf{NOTE: Be careful not have re-compiled \projectname since the time of the crash.
+If you have done so, the disassembled instructions will not match those which generated the crash.}
+
+Once we opened the binary in IDA we can use the Jump to Address (G keyboard shortcut) to jump to the 
+faulting instruction: 0xFFFF800001032CFB. In our case we see \fullref{fig:IdaFault}.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.7]{IdaFaulting}
+		\caption{IDA disassembly near RIP}
+	\label{fig:IdaFault}
+\end{figure}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.7]{IdaReferences}
+		\caption{\func{ProcessGetName} References}
+	\label{fig:IdaRefs}
+\end{figure}
+
+As previously stated, RAX+0x20 is dereferenced and because RAX is NULL the faulting address is 0x20.
+The function in which this takes place is \func{ProcessGetName}. If we press CTRL + X once the
+function name is selected we can see that this function is only called from 3 other functions -
+illustrated in \fullref{fig:IdaRefs}.
+
+From these 3 functions we can deduce that the one which actually called \func{ProcessGetName} is
+\func{ProcessThreadInsertIntoList} because the last thing logged before the exception is from
+\file{thread.c} line 184 which belongs to the \func{ThreadSystemInitMainForCurrentCPU} function,
+which doesn't interact with the other 2 candidate functions.
+
+Usually, at this point we can remember exactly (or look at the diffs in our source control system)
+to see what what code changes we have made in this region.
+
+In case this is not enough information we can also look at the stack dump from the end of the log to
+determine the call stack hierarchy. Addresses which begin with 0xFFFF85 correspond to dynamically
+allocated memory, so we only have to look at addresses which are of the form 0xFFFF8000010 These
+addresses belong either to code, or to data segments. This can be determined with 100\% precision
+by looking at the PE, but because there are very few such addresses on the stack we can easily use
+Jump to Address (G) to see the position of each address.
+
+If we go to  0xFFFF80000103330F we will see that we're in \func{ProcessInsertThreadInList}, if we
+want to go further up the hierarchy we look for the next potential code address candidate. Once we
+find it, in our case 0xFFFF80000106AE90, we go to it and discover that the address belongs to
+\func{ThreadSystemInitMainForCurrentCPU}.
+
+The next candidates are  0xFFFF8000010EECA8 and  0xFFFF8000010EEC9C, however once we go to their
+addresses we will see that these are data values and not code. If we want more data dumped from the
+stack we can increase the value of \macro{STACK\_BYTES\_TO\_DUMP\_ON\_EXCEPTION} macro from
+\file{isr.c}, recompile \projectname and re-run the code.
+
+\section{Halt debugging}
+
+Sometimes you will have bugs in the early boot stages of the operating system. Unfortunately, until
+the interrupt handlers are setup every exception generated by the processor leads to a system reboot.
+This is because each exception generated leads to a double fault (\#DF) because the interrupt
+handlers are not setup and there's nothing to handle the exception. The double fault can't be
+handled either and a triple fault is generated, a triple fault automatically reboots the system.
+
+\projectname initializes the interrupt handlers in \func{InitIdtHandlers} which is called by
+\func{SystemInit} pretty early in the initialization stage (before the memory managers are
+initialized).
+
+It is possible, due to bugs in the code, for the processor to generate triple faults in some
+situations even after the interrupt handlers have been setup. However this is very unlikely, if you
+have a triple fault it is very probable it is caused by the code executed before the call to
+\func{InitIdtHandlers}.
+
+If the problem occurs before the call to \func{SerialCommunicationInitialize} it is impossible for
+you to log anything. The method I suggest for debugging these issues is by placing HLT instructions
+causing the processor's execution to stop.
+
+Pick a place in \projectname, insert a call to \func{\_\_halt}, recompile and run. There are two
+likely possibilities:
+\begin{itemize}
+	\item The machine hangs without rebooting. If this happens, you know that the HLT instruction
+was reached and executed. That means that whatever caused the reboot must be after the place you
+inserted the HLT. Now move HLT later in the code sequence.
+
+	\item The machine reboots in a loop. If this happens, you know that the machine didn't make it
+to the HLT instruction. Thus, whatever caused the reboot must be before the place you inserted the
+HLT instruction. Now move the HLT instruction earlier in the code sequence.
+\end{itemize}
+
+If you move around the HLT instruction in a "binary search" fashion, you can use this technique to
+pin down the exact spot that everything goes wrong. It should only take a few minutes at most.
+
+\textbf{NOTE: Instead of using the HLT instruction you could place an infinite loop as suggested in
+the Pintos documentation.}
+
+\chapter{Development Tools}
+
+\section{Setting Up the Environment for \projectname}
+\label{sect:SetupBuild}
+
+The following steps describe the setup required for configuring your development system to be
+able to run, build and test \projectname. Except the first 2 steps, and the last one all the other
+steps can be done automatically by running the install script \file{HAL9000\_install.pl}
+(see \fullref{sect:AutoConf}).
+\begin{enumerate}
+	\item Download and install 
+\href{https://www.visualstudio.com/post-download-vs/?sku=community&clcid=0x409&downloadrename=true}{Visual Studio 2015 Community}.
+
+	\item Download and install
+\href{http://www.activestate.com/activeperl/downloads/thank-you?dl=http://downloads.activestate.com/ActivePerl/releases/5.24.0.2400/ActivePerl-5.24.0.2400-MSWin32-x86-64int-300560.exe}{Active Perl x86}.
+
+	\item Download and install \href{http://www.vmware.com/go/tryworkstation}{VMWare workstation}
+(\textbf{VMWare player will not good or other virtualization solutions are not good!}). You can
+download it from here and later activate it using your student license.
+
+	\item Unzip \projectname's source code, we will refer to the folder where you unzipped it as
+\var{PROJECT\_ROOT\_DIRECTORY}.
+
+	\item Unzip the VMWare Virtual Disk Development Kit, we will refer to the folder where you
+unzipped the files as \var{PATH\_TO\_VM\_TOOLS}.
+
+	\item Unzip the VMWare Vix archive, we will refer to the folder where you unzipped the files as
+\var{PATH\_TO\_VIX\_TOOLS}.
+
+	\item Unzip the two virtual machines HAL9000\_VM and PXE\_VM. We will refer to the folder where
+you unzipped the HAL9000\_VM as \var{PATH\_TO\_HAL9000\_VM}.
+
+	\item Unzip the PXE archive, we will refer to the folder where you unzipped the files as
+\var{PATH\_TO\_PXE}.
+
+	\item Open the HAL9000 VM and change its processor configuration so that the number of virtual
+CPUs given to the machine equals to the number of CPUs available on the physical machine.
+
+	\item Edit the \var{PROJECT\_ROOT\_DIRECTORY}/src/postbuild/paths.cmd file by adding the
+following lines before the ":end" label:
+
+\begin{verbatim}
+:config_\var{COMPUTER_NAME}
+
+set PXE_PATH=\var{PATH_TO_PXE}
+set PATH_TO_VM_DISK=\var{PATH_TO_HAL9000_VM}\HAL9000.vmdk
+set PATH_TO_VM_TOOLS=\var{PATH_TO_VM_TOOLS}
+set VOL_MOUNT_LETTER=Q:
+set PATH_TO_VIX_TOOLS=\var{PATH_TO_VIX_TOOLS}
+set PATH_TO_LOG_FILE=\var{PATH_TO_HAL9000_VM}\HAL9000.log
+set PATH_TO_VM_FILE=\var{PATH_TO_HAL9000_VM}\HAL9000.vmx
+
+goto end
+\end{verbatim}
+
+And the following line after "if \_\%COMPUTERNAME\%\_==\_ALEX-PC\_ goto config\_ALEX-PC" :
+\begin{verbatim}
+if _%COMPUTERNAME%_==_\var{COMPUTER_NAME}_ goto config_\var{COMPUTER_NAME}
+\end{verbatim}
+
+Where the \textbackslash raw variables must be replaced with the proper paths as mentioned in the
+configuration steps.
+
+	\item Create a new virtual network as described in \fullref{sect:VirtNetwork}.
+\end{enumerate}
+
+\subsection{Automatic Configuration}
+\label{sect:AutoConf}
+
+Because of the many steps involved in the configuration of the project, we wrote a perl installion
+script which handles all the configuration steps except the first two and the last one.
+
+Unfortunately we haven't been able to automate those steps so you'll have to do them manually.
+
+Once you completed the first two steps you should download each archive described in the
+configuration step and place them all in the same folder as the \file{HAL9000\_install.pl} perl
+script. The folder layout should look like \fullref{fig:AutoFolder} or \fullref{fig:AutoFolderTC}.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.76]{AutoFolder}
+		\caption{Folder structure for HAL9000\_install.pl}
+	\label{fig:AutoFolder}
+\end{figure}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.7]{AutoFolderTC}
+		\caption{Folder structure for HAL9000\_install.pl}
+	\label{fig:AutoFolderTC}
+\end{figure}
+
+You can run the script without any parameters and the script will extract all the archives in a
+HAL9000 directory which it will create in the current directory. The script will do all the
+configuration steps described in steps 3 to 10 (inclusive).
+
+Once the script finishes execution, all you are left with is the last step, i.e. configuring the
+virtual network, a guide is available at \fullref{sect:VirtNetwork}.
+
+\subsection{Virtual Network Creation}
+\label{sect:VirtNetwork}
+
+A host-only virtual network must be configured before to be able to perform a PXE boot. The
+following steps must be followed:
+
+\begin{enumerate}
+	\item Open VMWare workstation and in the \textit{Edit} menu choose the \textit{Virtual Network
+Editor} option as shown in \fullref{fig:VMwareMenu}.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.5]{VMWare_VirtNetMenu}
+		\caption{Edit -> Virtual Network Editor}
+	\label{fig:VMwareMenu}
+\end{figure}
+
+	\item Once in the \textit{Virtual Network Editor} click \textit{Change Settings}.
+
+	\item Click \textit{Add Network...} and select \textit{VMnet1} as the network to add. See
+\fullref{fig:VmWareAddNetwork}.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.75]{VMWare_AddVirtNet}
+		\caption{Add new network}
+	\label{fig:VmWareAddNetwork}
+\end{figure}
+
+	\item Once you added a new network select it as configure it as a \textit{Host-onl}y network,
+check the \textit{Connect a host virtual adapter to this network} option and un-check the
+\textit{Use local DHCP service to distribute IP address to VMs} option. Write in the
+\textit{Subnet IP} field 192.168.224.0 and set the \textit{Subnet mask} to 255.255.255.0. This is
+illustrated in \fullref{fig:VmWareVirtNetConf}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.75]{VMWare_VirtNetConf}
+		\caption{VMnet1 Configuration}
+	\label{fig:VmWareVirtNetConf}
+\end{figure}
+
+\end{enumerate}
+
+\subsection{System Architecture}
+
+The final architecture after you have successfully configured your system should look like the one
+illustrated in \fullref{fig:SystemArch}.
+
+You will have a virtual network called \textit{VMnet1} with network IP 192.168.224.0, subnet
+255.255.255.0 and DHCP on host disabled.
+
+You will have a PXE VM connected on VMnet1 which will host a DHCP and TFTP server and has a static
+IP assigned to 192.168.224.2. This VM has access to a shared folder from the host operating system
+from which it will supply the boot image to the HAL9000 VM for network boot through PXE.
+
+You will have a HAL9000 VM which is connected to VMnet1 and which will boot from the network. On
+boot PXE VM will provide the boot image and the OS will be automatically loaded and started. All
+the messages logged by HAL9000 VM will be written into the \file{HAL9000.log} file on the host
+machine.
+
+You will have a Visual Studio solution which will hold many projects, 2 of which are very important:
+\begin{itemize}
+	\item The HAL9000 project: upon successful build the binary is copied to the PXE shared folder
+so the PXE VM will be able to instantly provide the new image to the HAL9000 VM.
+
+	\item RunAllTests project: copies the Tests.module file to the PXE share and starts the HAL9000
+VM. The .module file is the one which tells the HAL9000 operating system which tests it needs to run
+and validate.
+
+	After the HAL9000 VM has finished execution the log file, \file{HAL9000.log}, will be parsed by
+the project and the results of each test and a summary will be displayed.
+\end{itemize}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.96]{VMArchitecture}
+		\caption{System Architecture}
+	\label{fig:SystemArch}
+\end{figure}
+
+\subsection{Troubleshooting}
+
+\subsubsection{HAL9000 VM not receiving an IP}
+
+If you're in the situation illustrated in \fullref{fig:DHCPFail} it means you are not receiving an
+IP address. The reason is one of the following:
+\begin{itemize}
+	\item VMnet1 is not configured properly. It is important to use the IP and subnet addresses
+specified in \fullref{sect:VirtNetwork}.
+
+	\item HAL9000 VM is not connected to VMnet1. You can check this by going to the virtual machine,
+\textit{Edit virtual machine settings} -> \textit{Hardware} -> \textit{Network Adapter} and make
+sure the network selected is Custom: VMnet1. Also make sure \textit{Connect at power on} is checked
+for the network adapter.
+
+	\item PXE VM is not connected to VMnet1. Apply the same steps as if HAL9000 VM was not connected
+to VMnet1.
+
+	\item PXE VM is not turned on.
+\end{itemize}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.86]{DHCPFail}
+		\caption{DHCP fail}
+	\label{fig:DHCPFail}
+\end{figure}
+
+\subsubsection{HAL9000 VM TFTP open timeout}
+
+If you're in the situation illustrated in \fullref{fig:TFTPFail} it means the TFTP folder is not
+accessible to the PXE VM.
+
+This is probably caused by the fact that the shared folders are disabled for the PXE VM. To fix the
+problem power off the PXE VM and go to \textit{Edit virtual machine settings} -> \textit{Options} ->
+\textit{Shared Folders} and make sure \textit{Always Enabled} is checked. Re-start the PXE VM and the
+problem should be solved.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.86]{TFTPFail}
+		\caption{TFTP fail}
+	\label{fig:TFTPFail}
+\end{figure}
+
+\subsubsection{HAL9000 VM boot file not found}
+
+If you're in the situation illustrated in \fullref{fig:BootFileNotFound} it means that the shared
+PXE folder is missing the HAL9000.bin file. The following reasons are most probable:
+\begin{itemize}
+	\item HAL9000 project compilation failed. Make sure you successfully compiled your project.
+Rebuild the HAL9000 project to be sure.
+
+	\item You may have skipped some configuration steps and because of this the HAL9000 project does
+not copy the output file to the PXE folder. Take a look in the PXE folder and see if a file appears
+after you successfully compiled HAL9000, if it does not go back to \fullref{sect:SetupBuild} and
+try to figure out what configuration step you've skipped.
+\end{itemize}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.86]{BootFileNotFound}
+		\caption{File not found}
+	\label{fig:BootFileNotFound}
+\end{figure}
+
+\section{Visual Studio}
+\label{sect:VisualStudio}
+
+Before starting work in visual studio (VS) we \textbf{RECOMMEND} that you install the Visual Assist
+\cite{visualAssist} extension. It is a very handy tool which enhances your IDE experience and helps
+you write better and faster code.
+
+Now, that you've setup your environment as described in \fullref{sect:SetupBuild} we can now get down
+to business. To open the project in VS you need to go to the HAL9000/\file{src} folder and open the
+\file{HAL9000.sln} file.
+
+This will open the \projectname VS project and you will see something like \fullref{fig:VSSolution}
+in front of you. This is because the solution contains many more smaller projects, some of these
+projects are the HAL9000 project (the core itself), the hardware abstraction layer, drivers, user
+applications and other utilities. You can see a basic description of the projects in
+\fullref{sect:SourceTree}.
+
+\begin{figure}
+	\centering
+	\includegraphics[height=1.3\textwidth]{VS_Solution}
+		\caption{\projectname Solution}
+	\label{fig:VSSolution}
+\end{figure}
+
+Each project is in turn divided into filters, for example in the HAL9000 project we can see the
+following filters: \textit{Header Files}, \textit{Source Files} and we can go deeper in the hierarchy.
+For example, we can go through the \textit{Source Files -> devices -> apic} filter to see the files
+responsible for managing the IOAPIC and the LAPIC. At first it may seem cumbersome to navigate the
+project this way, but the files are organized logically (by component) and once you learn where each
+functionality is it will be easy for you to navigate through the project.
+
+Other tips for easy navigation can be found in \fullref{sect:KeyboardShortcuts}.
+
+\subsection{Keyboard Shortcuts}
+\label{sect:KeyboardShortcuts}
+
+\begin{itemize}
+	\item By pressing "CTRL + ," a search bar appears on your top right and you will be able to
+search symbols (functions and variables), data definitions and files dynamically while typing. This
+searches through external projects and dependencies as well.
+
+	\item By pressing "ALT + SHIFT + S" a find symbol box opens and you can search only for symbols.
+\textbf{NOTE: This is only available with Visual Assist}.
+
+	\item By pressing "ALT + SHIFT + O" you can type the file name to which you want to jump to.
+\textbf{NOTE: This is only available with Visual Assist}.
+
+	\item By pressing "ALT + SHIFT + F" while a symbol, data structure or definition is selected
+a smart search will occur and all its references will be displayed. \textbf{NOTE: This is only
+available with Visual Assist}.
+
+	\item By pressing "ALT + SHIFT + R" while a symbol, data structure or definition is selected
+you can change its name and all the instances will reflect its new name - smart search and replace.
+\textbf{NOTE: This is only available with Visual Assist}.
+
+	\item By pressing "ALT + M" while in a file a drop-down will appear listing all the symbols
+defined in this file. \textbf{NOTE: This is only available with Visual Assist}.
+
+	\item By Pressing "ALT + G" (with Visual Assist) or "F12" on a function you can either go to
+its declaration or its implementation. \textbf{NOTE: The Visual Assist option usually works better}.
+
+	\item By pressing "CTRL + G" while in a file you can jump to any line.
+
+	\item By pressing "ALT + O" while in a file you can toggle between the .h and the .c file. For
+example if you're in the thread.c file and press ALT + O you will be in the thread.h file, press it
+again and you'll return to the c file.
+
+	\item By pressing "CTRL + SHIFT + F" you can launch a text search in the whole solution, project
+or files whose names follow a certain pattern.
+
+	\item By pressing "CTRL + F" you can perform a text search the current file.
+
+\end{itemize}
+
+\section{Hg}
+
+It's crucial that you use a source code control system to manage your \projectname code. This will
+allow you to keep track of your changes and coordinate changes made by different people in the 
+project. For this class we recommend that you use hg \cite{tortoiseHg}. If you don’t
+already know how to use hg, we recommend that you read the guide at \href{http://hginit.com/}{hginit}.
+
+For hosting your project we recommend that you use Bitbucket \cite{bitbucket}. You can use any 
+hosting site you like as long as the project repository is a private one, i.e. it is not visible to
+any users outside your team (and maybe your TA).
+
+\chapter{Coding Style}
+
+Unfortunately, due to the fact that the work done on \projectname spans a long period (almost a
+year) some minor coding style changes have been made and the code is not 100\% consistent with the
+coding style.
+
+\section{Functional rules}
+\begin{itemize}
+	\item Global variable usage should be as limited as possible, instead use static file variables,
+this restricts access to the variable only to the functions in the current compilation unit (c file).
+
+	Keeping track of global variables can be very hard and it is very poor design to allow for a
+variable to be modified by any piece of code. If data must be modified by more components special
+functions should exist to do this, see \func{LogSetState} and friends, \func{ThreadExecuteForEachThreadEntry}
+and similar functions which can be called from any OS module, and modify static file variables.
+
+	\item When a function should only be used by a single C file it should be a static function.
+
+	\item Instead of using goto cleanup construct, use the \_\_try \_\_finally construction, see
+\href{https://msdn.microsoft.com/en-us/library/9xtt5hxz.aspx}{MSDN try-finally} for details and
+\func{ProcessCreate} for a usage example.
+
+	\item Functions which can be called from outside the trust boundary (between different projects
+or privilege levels) should validate all the parameters.
+
+	\item Internal functions which can be called only from inside the trust boundary (inside the
+same project) should NOT validate any arguments, however it is a good technique to use ASSERTs to
+validate the function's parameters.
+
+	\item Validate the successful execution of any function you're calling that returns a status.
+
+	\item Functions should be annotated using SAL.
+\end{itemize}
+
+\section{Non-functional Rules}
+\begin{itemize}
+	\item Function names should be UpperCamelCase: \func{MmuPreinitSystem}, \func{ThreadCreate}.
+	\item Local variables names should be lowerCamelCase: status, firstArg, secondArg.
+	\item Structure field names should be UpperCamelCase: SystemUptime, TickCountEarly, AllList.
+
+	\item Static functions names should be \_UpperCamelCase: \func{\_ThreadReference}.
+	\item Static local variables names should be \_\_lowerCamelCase: \_\_currentEntry;
+	\item Static file variables names should be: m\_lowerCamelCase: m\_coreData;
+
+	\item The names of variables which hold pointers should be preceded by a p: pFirstArg,
+\_\_pCurrentEntry, m\_pData;
+	\item The names of variables which hold BOOLEAN values should be preceded by a b: bFound,
+\_\_bFinished, m\_bInitialized;
+
+	\item Lines should not be longer than 120 columns.
+\end{itemize}
+
+\chapter{Project Documentation}
+\label{chap:ProjDoc}
+
+This is taken from the Pintos documentation as is.
+
+This chapter presents a sample assignment and a filled-in design document for one possible
+implementation. Its purpose is to give you an idea of what we expect to see in your own
+design documents.
+
+\section{Sample Assignment}
+
+Implemented \func{thread\_join}.
+
+\textbf{void thread\_join( tid\_t tid)}
+
+Blocks the current thread until thread tid exits. If A is the running thread and B is
+the argument, then we say that "A joins B."
+
+Incidentally, the argument is a thread id, instead of a thread pointer, because a thread
+pointer is not unique over time. That is, when a thread dies, its memory may be,
+whether immediately or much later, reused for another thread. If thread A over time
+had two children B and C that were stored at the same address, then thread\_join(B)
+and thread\_join(C) would be ambiguous.
+
+A thread may only join its immediate children. Calling thread\_join() on a thread
+that is not the caller’s child should cause the caller to return immediately. Children
+are not "inherited," that is, if A has child B and B has child C, then A always returns
+immediately should it try to join C, even if B is dead.
+
+A thread need not ever be joined. Your solution should properly free all of a thread's
+resources, including its struct thread, whether it is ever joined or not, and regardless
+of whether the child exits before or after its parent. That is, a thread should be freed
+exactly once in all cases.
+
+Joining a given thread is idempotent. That is, joining a thread multiple times is
+equivalent to joining it once, because it has already exited at the time of the later
+joins. Thus, joins on a given thread after the first should return immediately.
+You must handle all the ways a join can occur: nested joins (A joins B, then B joins
+C), multiple joins (A joins B, then A joins C), and so on.
+
+\section{Sample Design Document}
+
+\begin{verbatim}
+                            +-----------------+
+                            | CS 140          |
+                            | SAMPLE PROJECT  |
+                            | DESIGN DOCUMENT |
+                            +-----------------+
+							
+---- GROUP ----
+
+Ben Pfaff <blp@stanford.edu>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for
+>> the TAs, or extra credit, please give them here.
+
+(This is a sample design document.)
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation,
+>> course text, and lecture notes.
+
+None.
+
+                            JOIN
+                            ====
+							
+---- DATA STRUCTURES ----
+
+>> Copy here the declaration of each new or changed ‘struct’ or ‘struct’
+>> member, global or static variable, ‘typedef’, or enumeration.
+>> Identify the purpose of each in 25 words or less.
+
+A "latch" is a new synchronization primitive. Acquires block
+until the first release. Afterward, all ongoing and future
+acquires pass immediately.
+
+/* Latch. */
+struct latch
+{
+    bool released; /* Released yet? */
+    struct lock monitor_lock; /* Monitor lock. */
+    struct condition rel_cond; /* Signaled when released. */
+};
+
+Added to struct thread:
+
+/* Members for implementing thread_join(). */
+struct latch ready_to_die; /* Release when thread about to die. */
+struct semaphore can_die; /* Up when thread allowed to die. */
+struct list children; /* List of child threads. */
+list_elem children_elem; /* Element of ‘children’ list. */
+
+---- ALGORITHMS ----
+
+>> Briefly describe your implementation of thread_join() and how it
+>> interacts with thread termination.
+
+thread_join() finds the joined child on the thread’s list of
+children and waits for the child to exit by acquiring the child’s
+ready_to_die latch. When thread_exit() is called, the thread
+releases its ready_to_die latch, allowing the parent to continue.
+
+---- SYNCHRONIZATION ----
+
+>> Consider parent thread P with child thread C. How do you ensure
+>> proper synchronization and avoid race conditions when P calls wait(C)
+>> before C exits? After C exits? How do you ensure that all resources
+>> are freed in each case? How about when P terminates without waiting,
+>> before C exits? After C exits? Are there any special cases?
+
+C waits in thread_exit() for P to die before it finishes its own
+exit, using the can_die semaphore "down"ed by C and "up"ed by P as
+it exits. Regardless of whether whether C has terminated, there
+is no race on wait(C), because C waits for P’s permission before
+it frees itself.
+
+Regardless of whether P waits for C, P still "up"s C’s can_die
+semaphore when P dies, so C will always be freed. (However,
+freeing C’s resources is delayed until P’s death.)
+
+The initial thread is a special case because it has no parent to
+wait for it or to "up" its can_die semaphore. Therefore, its
+can_die semaphore is initialized to 1.
+
+---- RATIONALE ----
+
+>> Critique your design, pointing out advantages and disadvantages in
+>> your design choices.
+
+This design has the advantage of simplicity. Encapsulating most
+of the synchronization logic into a new "latch" structure
+abstracts what little complexity there is into a separate layer,
+making the design easier to reason about. Also, all the new data
+members are in ‘struct thread’, with no need for any extra dynamic
+allocation, etc., that would require extra management code.
+On the other hand, this design is wasteful in that a child thread
+cannot free itself before its parent has terminated. A parent
+thread that creates a large number of short-lived child threads
+could unnecessarily exhaust kernel memory. This is probably
+acceptable for implementing kernel threads, but it may be a bad
+idea for use with user processes because of the larger number of
+resources that user processes tend to own.
+\end{verbatim}
+
+\end{appendices}

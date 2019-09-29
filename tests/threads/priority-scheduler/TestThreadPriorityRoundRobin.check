@@ -1,0 +1,49 @@
+use strict;
+use warnings;
+
+# a.k.a. main
+die "Usage $0 PATH_TO_RESULT_FILE\n" if @ARGV < 1;
+
+local $/;
+
+my $failure = 0;
+
+open(my $fh, '<', $ARGV[0]) or die sprintf("Could not open file %s", $ARGV[0]);
+
+my $data = <$fh>;
+
+close $fh;
+
+my @capturedData = $data =~ /Thread (0x[[:xdigit:]]+) with priority (\d+)/gsi;
+my %hThreadTimes;
+
+my $noOfThreads = ($data =~ /Will create (\d+) threads for running test/si)[0];
+
+my $thIdx = 0;
+my @sequence;
+
+while (my ($strTid,$priority) = splice(@capturedData,0,2)) 
+{
+    my $tid = eval $strTid;
+
+    $hThreadTimes{$tid} = ($hThreadTimes{$tid} // 0) + 1;
+    
+    if ($thIdx < $noOfThreads)
+    {
+        push @sequence, $tid;
+    }
+    else
+    {
+        (print sprintf("[FAIL] Next thread should have been with TID 0x%x, instead thread with 0x%x executed!\n", $sequence[$thIdx % $noOfThreads], $tid)), $failure = 1, last if $sequence[$thIdx % $noOfThreads] != $tid;
+    }
+
+    
+    $thIdx++;
+}
+
+if (not $failure)
+{
+    print sprintf("[FAIL] Only %d threads should have been scheduled, but %d have actually run!\n", $noOfThreads, scalar keys %hThreadTimes), $failure = 1 if scalar keys %hThreadTimes != $noOfThreads;
+}
+
+exit $failure;

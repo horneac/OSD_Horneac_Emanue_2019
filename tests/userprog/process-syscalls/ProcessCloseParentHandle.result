@@ -1,0 +1,4 @@
+[ProcessCloseParentHandle.exe]:[Successfully validated the interface!]
+[Proces~3.exe]:[Successfully validated the interface!]
+[Proces~3.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
+[ProcessCloseParentHandle.exe]:[Returned from main function, will call ThreadExit with status 0x0!]
