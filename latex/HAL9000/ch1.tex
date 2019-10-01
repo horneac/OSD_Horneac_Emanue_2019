@@ -84,10 +84,12 @@ like the one illustrated in \fullref{fig:ProjectRoot}.
 |-- [ dir]  bin
 |-- [ dir]  acpi
 |-- [ dir]  docs
+|-- [ dir]  postbuild
 |-- [ dir]  PXE
 |-- [ dir]  src
 |   |-- [ dir]  Ata
 |   |-- [ dir]  CommonLib
+|   |-- [ dir]  CommonLibUnitTests
 |   |-- [ dir]  Disk
 |   |-- [ dir]  Eth_82574L
 |   |-- [ dir]  FAT32
@@ -98,8 +100,8 @@ like the one illustrated in \fullref{fig:ProjectRoot}.
 |   |-- [ dir]  NetworkPort
 |   |-- [ dir]  NetworkStack
 |   |-- [ dir]  PE_Parser
-|   |-- [ dir]  postbuild
 |   |-- [ dir]  shared
+|   |-- [ dir]  SwapFS
 |   |-- [ dir]  Usermode
 |   |-- [ dir]  Utils
 |   |-- [ dir]  Volume
@@ -118,15 +120,14 @@ like the one illustrated in \fullref{fig:ProjectRoot}.
 	\item acpi: contains the external acpica library. It is used for parsing the ACPI tables.
 	\item docs: contains this documentation and documentation related to the hardware components or
 external libraries used by \projectname.
+	\item postbuild: contains the scripts which write the OS binary to the PXE folder, write
+the user applications to the VM hard disk and run the tests. You will not run these scripts directly, they are part of VS projects.
 	\item src:
 		\begin{itemize}
 			\item HAL9000.sln: project solution - this is what you need to open with VS.
 			\item HAL9000\_WithoutApplications.sln same as HAL9000.sln except it does not contain
 		the user-mode projects. If you feel that VS is working too slow with the full project try
 		using this.
-			\item postbuild: contains the scripts which write the OS binary to the PXE folder, write
-		the user applications to the VM hard disk and run the tests. You will not run these scripts
-		directly, they are part of VS projects.
 			\item Usermode: contains all the user-mode applications and the common user-mode library.
 			\item Other folders belong to their respective projects, you will only have to work with
 		the HAL9000 project, but we suggest you navigate the project only in VS, see
@@ -155,9 +156,12 @@ will see several projects loaded in the VS solution:
 \begin{itemize}
 	\item FAT32
 
-	Provides a basic implementation of a FAT32 file system driver. It lacks the support for long
-file names - uses only 8.3 name format - and does not support writing to the disk. You will not work
-here.
+	Provides a simple implementation of a FAT32 file system driver. You will not work here.
+
+	\item SwapFS
+
+	Responsible for managing the swap partition : provides simple read/write functionality at a 4KB
+granularity. You will not work here.
 
 	\item PE\_parser
 
@@ -214,7 +218,12 @@ results will be displayed. More details in \fullref{sect:Testing}.
 	Contains some basic data structures and functions which would normally be present in the C
 standard library and several other generic constructs which are not coupled with \projectname. Some
 of the features include: string manipulation functions, reference counters, bitmaps, spinlocks,
-support for termination handlers and so on.
+hash tables, support for termination handlers and so on.
+
+	\item CommonLibUnitTests
+
+	Not relevant to the project or any of the laboratories. If you want to write user-mode C++ code
+to test the \textit{CommonLib} functionality here's the place where you can do it.
 
 	\item HAL
 

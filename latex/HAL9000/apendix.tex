@@ -165,57 +165,7 @@ For a further discussion on the synchronization mechanisms used in \projectname 
 
 To communicate between CPUs an architectural mechanism is provided through Inter Processor
 Interrupts (IPIs). Any CPU can send an interrupt to himself, any other CPU, any group of CPUs or
-to all the CPUs in the system.
-
-\projectname provides a mechanism for sending such messages to other CPUs through the
-\func{SmpSendGenericIpi} and \func{SmpSendGenericIpiEx} as shown in \fullref{lst:SmpIpi}.
-
-\begin{lstlisting}[caption={IPI functions},label={lst:SmpIpi}]
-// Calls SmpSendGenericIpiEx with SmpIpiSendToAllExcludingSelf causing the
-// BroadcastFunction to be executed on each CPU except the one that is calling
-// the function.
-STATUS
-SmpSendGenericIpi(
-    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
-    IN_OPT  PVOID                   Context,
-    IN_OPT  PFUNC_FreeFunction      FreeFunction,
-    IN_OPT  PVOID                   FreeContext,
-    IN      BOOLEAN                 WaitForHandling
-    );
-
-//******************************************************************************
-// Function:     SmpSendGenericIpiEx
-// Description:  The current CPU sends an IPI to the processors specified by
-//               SendMode and Destination to execute the BroadcastFunction.
-// Returns:      STATUS
-// Parameter:    IN PFUNC_IpcProcessEvent BroadcastFunction - Function to execute
-//               on each destination CPU.
-// Parameter:    IN_OPT PVOID Context - The context to be passed to the
-//               BroadcastFunction.
-// Parameter:    IN_OPT PFUNC_FreeFunction FreeFunction - The function to free
-//               the context sent to the BroadcastFunction.
-// Parameter:    IN_OPT PVOID FreeContext - The context to be sent to the
-//               FreeFunction.
-// Parameter:    IN BOOLEAN WaitForHandling - if TRUE waits until each CPU
-//               executes the  BroadcastFunction.
-// Parameter:    IN SMP_IPI_SEND_MODE SendMode - together with Destination
-//               specifies the target processors for IPI delivery.
-// Parameter:    IN SMP_DESTINATION Destination - species the destination
-//               processor(s).
-//******************************************************************************
-STATUS
-SmpSendGenericIpiEx(
-    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
-    IN_OPT  PVOID                   Context,
-    IN_OPT  PFUNC_FreeFunction      FreeFunction,
-    IN_OPT  PVOID                   FreeContext,
-    IN      BOOLEAN                 WaitForHandling,
-    IN _Strict_type_match_
-            SMP_IPI_SEND_MODE       SendMode,
-    _When_(SendMode == SmpIpiSendToCpu || SendMode == SmpIpiSendToGroup, IN)
-            SMP_DESTINATION         Destination
-    );
-\end{lstlisting}
+to all the CPUs in the system. For more information about this mechanism be sure to read \fullref{sect:IntCpuComm}.
 
 \subsection{Why 64-bit?}
 \label{sect:Why64}
@@ -947,6 +897,217 @@ If the main thread wishes to create additional threads it should call \func{UmCr
 UsermodeLibrary will internally call \func{SyscallThreadCreate} with \func{\_\_start\_thread} as the
 function. This is to ensure that the newly spawned thread properly exits through the
 \func{SyscallThreadExit} system call.
+
+\section{Interprocessor Communication}
+\label{sect:IntCpuComm}
+
+\projectname provides an abstraction over the x86 mechanism of sending IPIs to other CPUs. This is done through the \func{SmpSendGenericIpi} and \func{SmpSendGenericIpiEx} functions as shown in \fullref{lst:SmpIpi}. \fullref{sect:SmpIpiParam} provides an overview of the parameters required by these functions, while \fullref{sect:SmpIpiExamples} offers a few common usage examples.
+
+\begin{lstlisting}[caption={IPI functions},label={lst:SmpIpi}]
+// Calls SmpSendGenericIpiEx with SmpIpiSendToAllExcludingSelf causing the
+// BroadcastFunction to be executed on each CPU except the one that is calling
+// the function.
+STATUS
+SmpSendGenericIpi(
+    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
+    IN_OPT  PVOID                   Context,
+    IN_OPT  PFUNC_FreeFunction      FreeFunction,
+    IN_OPT  PVOID                   FreeContext,
+    IN      BOOLEAN                 WaitForHandling
+    );
+
+STATUS
+SmpSendGenericIpiEx(
+    IN      PFUNC_IpcProcessEvent   BroadcastFunction,
+    IN_OPT  PVOID                   Context,
+    IN_OPT  PFUNC_FreeFunction      FreeFunction,
+    IN_OPT  PVOID                   FreeContext,
+    IN      BOOLEAN                 WaitForHandling,
+    IN _Strict_type_match_
+            SMP_IPI_SEND_MODE       SendMode,
+    _When_(SendMode == SmpIpiSendToCpu || SendMode == SmpIpiSendToGroup, IN)
+            SMP_DESTINATION         Destination
+    );
+\end{lstlisting}
+\subsection{Parameter overview}
+\label{sect:SmpIpiParam}
+
+Let's have a look at the parameters required for \func{SmpSendGenericIpiEx}:
+\begin{enumerate}
+	\item \textbf{BroadcastFunction} - This is the function which will be executed by the targeted CPUs.
+
+	\item Context - If you want to pass some information to the targeted CPUs you can pass a pointer to this field.
+
+	\item FreeFunction - If you have allocated your Context dynamically you can specify a function to be executed after the targets complete the BroadcastFunction - useful for cleanup.
+
+	\item \textbf{WaitForHandling}
+	\	\begin{itemize}
+		\item When TRUE this function blocks until all the targeted CPUs execute the BroadcastFunction
+		\item When FALSE the function returns after sending the IPI
+		\end{itemize}
+
+	\item Determines the wait in which the final parameter is interpreted:
+		\begin{itemize}
+			\item SmpIpiSendToSelf - Will execute the BroadcastFunction on the current CPU.
+			\item \textbf{SmpIpiSendToAllExcludingSelf} - Will execute the BroadcastFunction on all the CPUs \textbf{except the current CPU}.
+			\item SmpIpiSendToAllIncludingSelf - Will execute the BroadcastFunction on all the CPUs \textbf{including the current CPU}.
+			\item \textbf{SmpIpiSendToCpu} - Will execute the BroadcastFunction on a specific CPU - the destination is specified in the last parameter.
+			\item SmpIpiSendToGroup - Will execute the BroadcastFunction on a specific group of CPUs - the destination is specified in the last paramter.
+		\end{itemize}
+
+	\item \textbf{Destination} - Must be completed only when SmpIpiSendToCpu or SmpIpiSendToGroup are used
+		\begin{itemize}
+			\item SmpIpiSendToCpu: The target CPU is given by the ApicId.
+			\item SmpIpiSendToGroup - The target group of CPUs are formed through a logical OR of the LogicalApicId values of the targeted processors.
+		\end{itemize}
+\end{enumerate}
+
+\subsection{Usage Examples}
+\label{sect:SmpIpiExamples}
+
+In this section we provide the following examples:
+\begin{itemize}
+	\item \fullref{lst:IpiExclSelfNoInfo} - execute a function on all the CPUs except the current one. The issuing CPU does not wait for the targeted CPUs to complete execution before continuing.
+
+	A possible outcome of the execution on a 4 core system could be:
+
+	\begin{verbatim}
+"Hello from CPU 0x2 [0x4]"
+"Hello from CPU 0x0 [0x1]"
+"Hello from CPU 0x1 [0x2]"
+"Hello from CPU 0x3 [0x8]"
+	\end{verbatim}
+
+	\begin{lstlisting}[caption={All the CPUs except the current one - no information passing},label={lst:IpiExclSelfNoInfo}]
+static FUNC_IpcProcessEvent _CmdIpiCmd;
+
+status = SmpSendGenericIpi(_CmdIpiCmd, NULL, NULL, NULL, FALSE);
+if (!SUCCEEDED(status))
+{
+    LOG_FUNC_ERROR("SmpSendGenericIpi", status);
+}
+
+LOG("Hello from CPU 0x%02x [0x%02x]\n", pCpu->ApicId, pCpu->LogicalApicId);
+
+static
+STATUS
+(__cdecl _CmdIpiCmd)(
+    IN_OPT  PVOID   Context
+    )
+{
+    PCPU* pCpu;
+
+    UNREFERENCED_PARAMETER(Context);
+
+    pCpu = GetCurrentPcpu();
+
+    LOG("Hello from CPU 0x%02x [0x%02x]\n", pCpu->ApicId, pCpu->LogicalApicId);
+
+    return STATUS_SUCCESS;
+}
+	\end{lstlisting}
+
+	\item \fullref{lst:IpiExclSelfWithInfo} is similar to the previous example in the sense that the function will be executed by all the CPUs except the issuing one, however this time the CPUs will complete in an array the timestamp at which they executed the function and the issuing CPU will wait for their execution to complete.
+
+A possible outcome of the execution on a 4 core system could be:
+
+	\begin{verbatim}
+"Timestamp for CPU 0 is 2305200"
+"Timestamp for CPU 1 is 2302200"
+"Timestamp for CPU 2 is 2303600"
+"Timestamp for CPU 3 is 2289000"
+	\end{verbatim}	
+
+	\begin{lstlisting}[caption={All the CPUs except the current one - passing information},label={lst:IpiExclSelfWithInfo}]
+static FUNC_IpcProcessEvent _CmdGetTimestamps;
+
+// determine the number of active CPUs in the system
+DWORD cpuCount = SmpGetNumberOfActiveCpus();
+
+// allocate memory to pass to the broadcast function
+QWORD* timeStamps = ExAllocatePoolWithTag(PoolAllocateZeroMemory, cpuCount * sizeof(QWORD), HEAP_TEMP_TAG, 0);
+ASSERT(timeStamps != NULL);
+
+status = SmpSendGenericIpi(_CmdGetTimestamps, timeStamps, NULL, NULL, TRUE);
+if (!SUCCEEDED(status))
+{
+    LOG_FUNC_ERROR("SmpSendGenericIpi", status);
+}
+
+// when we get here all the other CPUs will have already completed the timeStamps array
+timeStamps[GetCurrentPcpu()->ApicId] = IomuGetSystemTimeUs();
+
+for (DWORD i = 0; i < cpuCount; ++i)
+{
+    LOG("Timestamp for CPU %u is %U\n", i, timeStamps[i]);
+}
+
+// free the context - it is not used any more
+ExFreePoolWithTag(timeStamps, HEAP_TEMP_TAG)
+
+static
+STATUS
+(__cdecl _CmdGetTimestamps)(
+    IN_OPT  PVOID   Context
+    )
+{
+    PCPU* pCpu;
+    QWORD* timeStamps;
+
+    // verify that we received a valid context
+    ASSERT(Context != NULL);
+
+    pCpu = GetCurrentPcpu();
+
+    timeStamps = Context;
+    timeStamps[pCpu->ApicId] = IomuGetSystemTimeUs();
+
+    return STATUS_SUCCESS;
+}
+	\end{lstlisting}
+
+	\item \fullref{lst:IpiSendToCPU} offers an example of using the extended function (\textit{SmpSendGenericIpiEx}) by sending a function to be executed on a specific target CPU. Because the WaitForHandling parameter is TRUE we have the guarantee that by the time ew return from SmpSendGenericIpiEx the BroadcastFunction will have already been executed on the target.
+
+	The only possible outcome of the execution on a 4 core system would be:
+
+	\begin{verbatim}
+"Hello from CPU 0x3 [0x8]"
+"Hello from CPU 0x0 [0x1]"
+	\end{verbatim}
+
+\begin{lstlisting}[caption={Specific target CPU},label={lst:IpiSendToCPU}]
+static FUNC_IpcProcessEvent _CmdIpiCmd;
+
+SMP_DESTINATION destination = {0};
+destination.Cpu.ApicId = 3;
+
+status = SmpSendGenericIpiEx(_CmdIpiCmd, NULL, NULL, NULL, TRUE, SmpIpiSendToCpu, destination);
+if (!SUCCEEDED(status))
+{
+    LOG_FUNC_ERROR("SmpSendGenericIpi", status);
+}
+
+LOG("Hello from CPU 0x%02x [0x%02x]\n", pCpu->ApicId, pCpu->LogicalApicId);
+
+static
+STATUS
+(__cdecl _CmdIpiCmd)(
+    IN_OPT  PVOID   Context
+    )
+{
+    PCPU* pCpu;
+
+    UNREFERENCED_PARAMETER(Context);
+
+    pCpu = GetCurrentPcpu();
+
+    LOG("Hello from CPU 0x%02x [0x%02x]\n", pCpu->ApicId, pCpu->LogicalApicId);
+
+    return STATUS_SUCCESS;
+}
+	\end{lstlisting}
+
+\end{itemize}
 
 \section{Processes}
 \label{sect:Processes}
@@ -2435,7 +2596,7 @@ void DestroyProcessHashTable(void)
 }
 \end{lstlisting}
 
-\section{Timers}
+\section{Hardware Timers}
 
 Modern x86 systems possess a diverse range of hardware timers which can be programmed to achieve different
 functionalities:
@@ -2517,14 +2678,14 @@ When the interrupt triggers \func{\_SmpApicTimerIsr} will be executed.
 More information about the LAPIC timer can be found in \cite{intelSys} Chapter 10.5.4 APIC Timer and
 \href{http://wiki.osdev.org/APIC_timer}{OS dev - LAPIC Timer}.
 
-\chapter{Debugging Tools}
+\chapter{Debugging}
 \label{chap:Debugging}
 
 \projectname is a complex project and sometimes when you'll make a change in the code you'll see
 that what's actually happening in the system differs from what you were expecting.
 
 Unfortunately, \projectname doesn't have support for a debugger, YET! We wish to write one for the
-second iteration of the project.
+third iteration of the project.
 
 However, in the author's opinion sufficient tools are available to solve any bugs which may arise
 in the code.
@@ -2532,6 +2693,8 @@ in the code.
 The following sections will go through the different techniques available for debugging code and
 detecting errors:
 \begin{itemize}
+	\item Signaling function failure: by returning (preferably) unique status values for functions which could fail you could pinpoint the location of the error more easily.
+
 	\item Logging: simply write messages logging the data which interests you, usually when there
 are bugs the information logged will differ from what you were expecting.
 
@@ -2544,6 +2707,82 @@ determine the call stack.
 	\item Halt debugging: when you're desperate and the system reboots in an infinite loop place
 some HLT instructions in the code to diagnose the problem.
 \end{itemize}
+
+\section{Signaling function failure}
+
+When working with \projectname you'll often see that most functions return a STATUS type
+value, depending on this value you can determine if the function failed or succeeded.
+The recommended way of doing this is by using the \macro{SUCCEEDED} macro, which returns TRUE in
+case of success, and FALSE in case of an \textbf{\color{red} error} or \textbf{\color{orange} warning} status.
+
+The reason why this format was chosen is so that it can be used in Windows applications as well
+without conflicting with existing Microsoft defined statuses. The format is defined by \href{https://docs.microsoft.com/en-us/windows-hardware/drivers/kernel/defining-new-ntstatus-values}{Microsoft} - you don't need to know the details, but the idea is that this format is very extensible and can be used by many different vendors (or in our case components) without overlaying results.
+
+\subsection{Interpreting STATUS values}
+
+The easiest way of interpreting a STATUS value is by copying its value in the Windows
+calculator application - or any other application which displays the bit values of a number.
+
+The STATUS type is simply a DWORD - 4 bytes and is interpreted in the following
+way:
+
+0x{\color{blue}S}{\color{purple}CCC}{\color{green}VVVV}.
+
+Where
+
+\begin{itemize}
+	\item S stands for Severity:
+		\begin{enumerate}
+			\item 0xE - Error
+			\item 0xA - Warning
+			\item 0x4 - Informational
+			\item 0x0 - Success
+		\end{enumerate}
+
+	\item CCC stands for Component:
+		\begin{enumerate}
+			\item 0x800 - General
+			\item 0x100 - CPU
+			\item 0x080 - Communication
+			\item 0x040 - Timers
+			\item 0x020 - Heap
+			\item 0x010 - Memory
+			\item 0x008 - Storage
+			\item 0x004 - Disk
+			\item 0x002 - Apic
+			\item 0x001 - Device
+		\end{enumerate}
+		
+	\item VVVV stands for the value within the component - unfortunately there are too many values
+	to enumerate here, but once you go to \file{status.h} you can easily determine the exact status.
+\end{itemize}
+
+Let's take an example of a status value and determine what it means: we have the following
+log message: \textit{[ata.c][82]AtaInitialize failed with status: 0xE0010001}.
+\begin{itemize}
+	\item First of all, the text between the first set of brackets tells us the file in which the
+message was logged - ata.c
+	\item Then, we have the number between the second set of brackets which indicate the line number
+- 81.
+	\item And finally we see the status value 0x{\color{blue}E}{\color{purple}001}{\color{green}0001}.
+
+	We always start interpreting from the LEFT to the RIGHT (starting from the MSB going to the LSB).
+
+	The severity is 0xE meaning it is an error message.
+	The component is 0x001 meaning it is a device error message.
+	And finally the value of the general error message is 0x0001, going to \file{status.h} and
+searching for the value within the statuses marked with \macro{DEVICE\_MASK} we find the status
+name being \macro{STATUS\_DEVICE\_DOES\_NOT\_EXIST}.
+\end{itemize}
+
+When the status name is not explicit enough to understand what it means or when it is returned you
+can always search in the whole solution to see where that status value is used.
+
+Ideally, statuses should not be too generic, but they should be specific enough for the programmer
+to be able to pinpoint the location (or few locations) from which the value could have been returned.
+
+\textbf{NOTE: It is recommended that you add new status values when you're working on your project
+and the code added can fail in a way not described by the existing values.}
 
 \section{Logging}
 
@@ -3233,153 +3472,16 @@ validate the function's parameters.
 \_\_bFinished, m\_bInitialized;
 
 	\item Lines should not be longer than 120 columns.
+
+	\item Use SPACES instead of TABS.
+
+	Tab size and indent size should be set to 4. You can set this in Visual Studio by accessing \textit{Tools -> Options -> Text Editor -> C/C++ -> Tabs} and checking the \textit{Insert spaces} radio button.
+
+	\item Do not leave empty lines or whitespaces at the end of the line.
+
+	We recommend installing the \textit{Trailing Whitespace Visualizer} plugin for Visual Studio. It can be installed by accessing \textit{Tools -> Extensions and Updates -> Online}. It is a free plugin and everytime you save a file it automatically removes trailing whitespaces and empty lines.
+
 \end{itemize}
 
-\chapter{Project Documentation}
-\label{chap:ProjDoc}
-
-This is taken from the Pintos documentation as is.
-
-This chapter presents a sample assignment and a filled-in design document for one possible
-implementation. Its purpose is to give you an idea of what we expect to see in your own
-design documents.
-
-\section{Sample Assignment}
-
-Implemented \func{thread\_join}.
-
-\textbf{void thread\_join( tid\_t tid)}
-
-Blocks the current thread until thread tid exits. If A is the running thread and B is
-the argument, then we say that "A joins B."
-
-Incidentally, the argument is a thread id, instead of a thread pointer, because a thread
-pointer is not unique over time. That is, when a thread dies, its memory may be,
-whether immediately or much later, reused for another thread. If thread A over time
-had two children B and C that were stored at the same address, then thread\_join(B)
-and thread\_join(C) would be ambiguous.
-
-A thread may only join its immediate children. Calling thread\_join() on a thread
-that is not the caller’s child should cause the caller to return immediately. Children
-are not "inherited," that is, if A has child B and B has child C, then A always returns
-immediately should it try to join C, even if B is dead.
-
-A thread need not ever be joined. Your solution should properly free all of a thread's
-resources, including its struct thread, whether it is ever joined or not, and regardless
-of whether the child exits before or after its parent. That is, a thread should be freed
-exactly once in all cases.
-
-Joining a given thread is idempotent. That is, joining a thread multiple times is
-equivalent to joining it once, because it has already exited at the time of the later
-joins. Thus, joins on a given thread after the first should return immediately.
-You must handle all the ways a join can occur: nested joins (A joins B, then B joins
-C), multiple joins (A joins B, then A joins C), and so on.
-
-\section{Sample Design Document}
-
-\begin{verbatim}
-                            +-----------------+
-                            | CS 140          |
-                            | SAMPLE PROJECT  |
-                            | DESIGN DOCUMENT |
-                            +-----------------+
-							
----- GROUP ----
-
-Ben Pfaff <blp@stanford.edu>
-
----- PRELIMINARIES ----
-
->> If you have any preliminary comments on your submission, notes for
->> the TAs, or extra credit, please give them here.
-
-(This is a sample design document.)
-
->> Please cite any offline or online sources you consulted while
->> preparing your submission, other than the Pintos documentation,
->> course text, and lecture notes.
-
-None.
-
-                            JOIN
-                            ====
-							
----- DATA STRUCTURES ----
-
->> Copy here the declaration of each new or changed ‘struct’ or ‘struct’
->> member, global or static variable, ‘typedef’, or enumeration.
->> Identify the purpose of each in 25 words or less.
-
-A "latch" is a new synchronization primitive. Acquires block
-until the first release. Afterward, all ongoing and future
-acquires pass immediately.
-
-/* Latch. */
-struct latch
-{
-    bool released; /* Released yet? */
-    struct lock monitor_lock; /* Monitor lock. */
-    struct condition rel_cond; /* Signaled when released. */
-};
-
-Added to struct thread:
-
-/* Members for implementing thread_join(). */
-struct latch ready_to_die; /* Release when thread about to die. */
-struct semaphore can_die; /* Up when thread allowed to die. */
-struct list children; /* List of child threads. */
-list_elem children_elem; /* Element of ‘children’ list. */
-
----- ALGORITHMS ----
-
->> Briefly describe your implementation of thread_join() and how it
->> interacts with thread termination.
-
-thread_join() finds the joined child on the thread’s list of
-children and waits for the child to exit by acquiring the child’s
-ready_to_die latch. When thread_exit() is called, the thread
-releases its ready_to_die latch, allowing the parent to continue.
-
----- SYNCHRONIZATION ----
-
->> Consider parent thread P with child thread C. How do you ensure
->> proper synchronization and avoid race conditions when P calls wait(C)
->> before C exits? After C exits? How do you ensure that all resources
->> are freed in each case? How about when P terminates without waiting,
->> before C exits? After C exits? Are there any special cases?
-
-C waits in thread_exit() for P to die before it finishes its own
-exit, using the can_die semaphore "down"ed by C and "up"ed by P as
-it exits. Regardless of whether whether C has terminated, there
-is no race on wait(C), because C waits for P’s permission before
-it frees itself.
-
-Regardless of whether P waits for C, P still "up"s C’s can_die
-semaphore when P dies, so C will always be freed. (However,
-freeing C’s resources is delayed until P’s death.)
-
-The initial thread is a special case because it has no parent to
-wait for it or to "up" its can_die semaphore. Therefore, its
-can_die semaphore is initialized to 1.
-
----- RATIONALE ----
-
->> Critique your design, pointing out advantages and disadvantages in
->> your design choices.
-
-This design has the advantage of simplicity. Encapsulating most
-of the synchronization logic into a new "latch" structure
-abstracts what little complexity there is into a separate layer,
-making the design easier to reason about. Also, all the new data
-members are in ‘struct thread’, with no need for any extra dynamic
-allocation, etc., that would require extra management code.
-On the other hand, this design is wasteful in that a child thread
-cannot free itself before its parent has terminated. A parent
-thread that creates a large number of short-lived child threads
-could unnecessarily exhaust kernel memory. This is probably
-acceptable for implementing kernel threads, but it may be a bad
-idea for use with user processes because of the larger number of
-resources that user processes tend to own.
-\end{verbatim}
 
 \end{appendices}

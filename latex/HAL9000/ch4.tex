@@ -434,6 +434,26 @@ One of the tests actually checks the following scenario: allocate 2 GiB of virtu
 the data from each page, you should remember that the swap file is only 128 MiB and a process is
 restricted to 16 frames of physical memory at a time.
 
+\subsection{Stack Growth}
+
+Implement stack growth. In project 2, the stack was 8 pages allocated eagerly and programs were limited to that much stack.
+
+Now, you should start with a stack of only 1 page and if the stack grows past its current size, allocate additional pages as necessary.
+
+Allocate additional pages only if they "appear" to be stack accesses. Devise a heuristic
+that attempts to distinguish stack accesses from other accesses. The x86 PUSH instruction checks access permissions before
+it adjusts the stack pointer, so it may cause a page fault 8 bytes below the stack pointer.
+(Otherwise, PUSH would not be restartable in a straightforward fashion.)
+
+Within a page fault generated, you can retrieve the current stack pointer
+from the \var{Rsp} member of \struct{INTERRUPT\_STACK\_COMPLETE} passed to \func{\_IsrExceptionHandler}
+You should impose some absolute limit on stack size, as do most OSes.  Some OSes make
+the limit user-adjustable, e.g. with the ulimit command on many Unix systems.  On many
+GNU/Linux systems, the default limit is 8 MB. The first stack page need not be allocated lazily. You can allocate and initialize it with
+the command line arguments at load time, with no need to wait for it to be faulted in.
+
+Stack pages do not count towards the processes's frame quota.
+
 \section{Source Files}
 
 For this project most of your work will be done in the \textit{core/memory} filter and some will

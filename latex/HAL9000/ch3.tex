@@ -263,11 +263,11 @@ relative path in which case the handling differs for these system calls:
 \begin{itemize}
 	\item In the case of \func{SyscallFileCreate} the final path is considered to be relative to the
 system drive, i.e. if "Test.ini" is the path given to the syscall, internally it will try to open
-"\%SYSTEMDRIVE\%\textbackslash Test.ini".
+"\%SYSTEMDRIVE\%Test.ini". If for example the system drive  is "C:\textbackslash" then the final path will be "C:\textbackslash Test.ini".
 
 	\item In the case of \func{SyscallProcesCreate} the final path is considered relative to the
 applications folder found on the system drive, i.e. if "Apps.exe" is the path given to the syscall,
-internally it will try to open "\%SYSTEMDRIVE\%\textbackslash APPLIC\textasciitilde 1\textbackslash Apps.exe".
+internally it will try to open "\%SYSTEMDRIVE\%Applications\textbackslash Apps.exe". If for example the system drive is "F:\textbackslash" then the final path will be "F:\textbackslash Applications \textbackslash Apps.exe".
 \end{itemize}
 
 NOTE: You can use \func{IomuGetSystemPartitionPath} to retrieve the system drive.
@@ -402,3 +402,9 @@ A: No.
 \textbf{Q: Do I have to do any changes in user-mode code?}
 
 A: No.
+
+\newline
+
+\textbf{Q: Do I have to implement argument passing for the tests to pass?}
+
+A: No, the argument passing functionality is necessary only for the argument passing tests: "TestUserArgsNone", "TestUserArgsOne", "TestUserArgsMany" and "TestUserArgsAll".
