@@ -3097,8 +3097,10 @@ the Pintos documentation.}
 \label{sect:SetupBuild}
 
 The following steps describe the setup required for configuring your development system to be
-able to run, build and test \projectname. Except the first 2 steps, and the last one all the other
-steps can be done automatically by running the install script \file{HAL9000\_install.pl}
+able to run, build and test \projectname. Except the first 3 steps, and the last 3, all the other
+steps can be done automatically by running either the script \file{HAL9000\_checkout.pl} (preferred, 
+because it pulls all the latest changes from the HAL9000 repository) or \file{HAL9000\_install.pl}
+(uses source files from \file{HAL9000\_SRC.zip}, which might not be up to date).
 (see \fullref{sect:AutoConf}).
 \begin{enumerate}
 	\item Download and install 
@@ -3114,11 +3116,9 @@ download it from here and later activate it using your student license.
 	\item Unzip \projectname's source code, we will refer to the folder where you unzipped it as
 \var{PROJECT\_ROOT\_DIRECTORY}.
 
-	\item Unzip the VMWare Virtual Disk Development Kit, we will refer to the folder where you
-unzipped the files as \var{PATH\_TO\_VM\_TOOLS}.
-
-	\item Unzip the VMWare Vix archive, we will refer to the folder where you unzipped the files as
-\var{PATH\_TO\_VIX\_TOOLS}.
+	\item Find the install path of VMware Workstation. We will refer to VMware install folder
+	as: \var{PATH\_TO\_VIX\_TOOLS}. If VMware is installed in the default location it should
+	be: \path{C:\ProgramFiles(x86)\VMware\VMwareWorkstation}
 
 	\item Unzip the two virtual machines HAL9000\_VM and PXE\_VM. We will refer to the folder where
 you unzipped the HAL9000\_VM as \var{PATH\_TO\_HAL9000\_VM}.
@@ -3137,8 +3137,6 @@ following lines before the ":end" label:
 
 set PXE_PATH=\var{PATH_TO_PXE}
 set PATH_TO_VM_DISK=\var{PATH_TO_HAL9000_VM}\HAL9000.vmdk
-set PATH_TO_VM_TOOLS=\var{PATH_TO_VM_TOOLS}
-set VOL_MOUNT_LETTER=Q:
 set PATH_TO_VIX_TOOLS=\var{PATH_TO_VIX_TOOLS}
 set PATH_TO_LOG_FILE=\var{PATH_TO_HAL9000_VM}\HAL9000.log
 set PATH_TO_VM_FILE=\var{PATH_TO_HAL9000_VM}\HAL9000.vmx
@@ -3154,41 +3152,80 @@ if _%COMPUTERNAME%_==_\var{COMPUTER_NAME}_ goto config_\var{COMPUTER_NAME}
 Where the \textbackslash raw variables must be replaced with the proper paths as mentioned in the
 configuration steps.
 
+	\item Open the virtual machines as described in \fullref{sect:OpenVirtualMachines}.
+	 
+	\item Enable shared folder as described in \fullref{sect:EnableSharedFolder}.
+
 	\item Create a new virtual network as described in \fullref{sect:VirtNetwork}.
 \end{enumerate}
 
 \subsection{Automatic Configuration}
 \label{sect:AutoConf}
 
-Because of the many steps involved in the configuration of the project, we wrote a perl installion
-script which handles all the configuration steps except the first two and the last one.
+Because of the many steps involved in the configuration of the project, we wrote two perl installation
+scripts which handle all the configuration steps except the first 3 and the last 3.
 
 Unfortunately we haven't been able to automate those steps so you'll have to do them manually.
 
+These two scripts are \file{HAL9000\_checkout.pl} and \file{HAL9000\_install.pl}.
+Use only one of them. We recommend using \file{HAL9000\_checkout.pl}. The difference between them 
+is that \file{HAL9000\_checkout.pl} pulls the latest source files from the HAL9000 repository, while
+\file{HAL9000\_install.pl} takes the source files from \file{HAL9000\_SRC.zip} (which might be outdated if we do not update them).
+
 Once you completed the first two steps you should download each archive described in the
-configuration step and place them all in the same folder as the \file{HAL9000\_install.pl} perl
-script. The folder layout should look like \fullref{fig:AutoFolder} or \fullref{fig:AutoFolderTC}.
+configuration step and place them so that the folder layout looks like \fullref{fig:AutoFolder} or \fullref{fig:AutoFolderTC}.
 
 \begin{figure}
 	\centering
-	\includegraphics[scale=0.76]{AutoFolder}
-		\caption{Folder structure for HAL9000\_install.pl}
+	\includegraphics[scale=0.76]{AutoFolderNew}
+		\caption{Folder structure for automatic configuration (File Explorer)}
 	\label{fig:AutoFolder}
 \end{figure}
 
 \begin{figure}
 	\centering
-	\includegraphics[scale=0.7]{AutoFolderTC}
-		\caption{Folder structure for HAL9000\_install.pl}
+	\includegraphics[scale=0.7]{AutoFolderTCNew}
+		\caption{Folder structure for automatic configuration (Total Commander)}
 	\label{fig:AutoFolderTC}
 \end{figure}
 
-You can run the script without any parameters and the script will extract all the archives in a
+You can run the chosen script without any parameters and the script will extract all the archives in a
 HAL9000 directory which it will create in the current directory. The script will do all the
-configuration steps described in steps 3 to 10 (inclusive).
+configuration steps described in steps 4 to 9 (inclusive).
 
-Once the script finishes execution, all you are left with is the last step, i.e. configuring the
-virtual network, a guide is available at \fullref{sect:VirtNetwork}.
+Once the script finishes execution, you need to continue the configuration manually with \fullref{sect:OpenVirtualMachines}.
+
+\subsection{Opening the virtual machines}
+\label{sect:OpenVirtualMachines}
+You need to open the two virtual machines in VMware Workstation. 
+To do this, navigate to the \path{VM\PXE} folder and double click on the
+\file{PXE.vmx} file - choose the default program as VMWare workstation if a popup appears.
+If VMware prompts you if the VM was copied or moved, select "I copied it". Do the
+same with \path{VM\HAL9000_VM\HAL9000.vmx}.
+
+\subsection{Enabling shared folder in the PXE virtual machine}
+\label{sect:EnableSharedFolder}
+Shared folders should be enabled in the PXE virtual machine so that it can grab the binary of
+HAL9000. VMware will disable shared folders when the PXE virtual machine is started for the first time, so you have to do the following:
+\begin{enumerate}
+	\item Start the PXE VM and wait for it to boot to the log in screen (you are not required to log in).
+	\item Enable shared folders from the settings of VMware as shown in \fullref{fig:PxeSharedFolder1} and \fullref{fig:PxeSharedFolder2}.
+	\item Reset/Restart the PXE VM so that the changes take effect.
+\end{enumerate}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.7]{PxeSharedFolder1.png}
+		\caption{PXE virtual machine settings}
+	\label{fig:PxeSharedFolder1}
+\end{figure}
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.7]{PxeSharedFolder2.png}
+		\caption{Enabling shared folder}
+	\label{fig:PxeSharedFolder2}
+\end{figure}
 
 \subsection{Virtual Network Creation}
 \label{sect:VirtNetwork}
