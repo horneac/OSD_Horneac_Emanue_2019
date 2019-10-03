@@ -1,40 +1,34 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<ProjectSchemaDefinitions xmlns="clr-namespace:Microsoft.Build.Framework.XamlTypes;assembly=Microsoft.Build.Framework" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib" xmlns:transformCallback="Microsoft.Cpp.Dev10.ConvertPropertyCallback">
+<?xml version="1.0" encoding="utf-8"?>
+<ProjectSchemaDefinitions xmlns="http://schemas.microsoft.com/build/2009/properties" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:sys="clr-namespace:System;assembly=mscorlib">
   <Rule
     Name="YASM"
     PageTemplate="tool"
-    DisplayName="Yasm Assembler"
+    DisplayName="Yasm Modular Assembler"
     Order="200">
-      
     <Rule.DataSource>
       <DataSource
         Persistence="ProjectFile"
         ItemType="YASM" />
     </Rule.DataSource>
-      
     <Rule.Categories>
-        
       <Category
         Name="General">
         <Category.DisplayName>
           <sys:String>General</sys:String>
         </Category.DisplayName>
       </Category>
-
       <Category
-        Name="Symbols">
-          <Category.DisplayName>
-              <sys:String>Symbols</sys:String>
-          </Category.DisplayName>
+        Name="Preprocessor">
+        <Category.DisplayName>
+          <sys:String>Preprocessing Options</sys:String>
+        </Category.DisplayName>
       </Category>
-
       <Category
-        Name="Files">
-          <Category.DisplayName>
-              <sys:String>Files</sys:String>
-          </Category.DisplayName>
+        Name="Assembler Options">
+        <Category.DisplayName>
+          <sys:String>Assembler Options</sys:String>
+        </Category.DisplayName>
       </Category>
-        
       <Category
         Name="Command Line"
         Subtype="CommandLine">
@@ -42,140 +36,93 @@
           <sys:String>Command Line</sys:String>
         </Category.DisplayName>
       </Category>
-        
     </Rule.Categories>
-
-    <StringListProperty
+    <StringProperty
       Name="Inputs"
       Category="Command Line"
-      IsRequired="true"
-      Switch=" ">
-      <StringListProperty.DataSource>
+      IsRequired="true">
+      <StringProperty.DataSource>
         <DataSource
           Persistence="ProjectFile"
           ItemType="YASM"
           SourceType="Item" />
-      </StringListProperty.DataSource>
-    </StringListProperty>
-    
+      </StringProperty.DataSource>
+    </StringProperty>
+    <StringProperty
+      Name="ObjectFileName"
+      Category="Assembler Options"
+      DisplayName="Output File Name"
+      Description="Specify Output Filename."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-objfile"
+      Switch="-o &quot;[value]&quot;" />
     <BoolProperty
-      Name="Debug"
-      Subcategory="Configuration"
-      HelpContext="0"
-      DisplayName="Debug Information"
-      Description="Generate debugging information"
+      Name="GenerateDebugInformation"
+      Category="Assembler Options"
+      DisplayName="Generate Debug Information"
+      Description="Generates Debug Information."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-dformat"
       Switch="-g cv8" />
-
+    <StringProperty
+      Name="SymbolsPrefix"
+      Category="Assembler Options"
+      DisplayName="Symbols Prefix"
+      Description="Prepend the given argument to all global or extern variables."
+      Switch="--prefix [value]" />
+    <StringProperty
+      Name="SymbolsPostfix"
+      Category="Assembler Options"
+      DisplayName="Symbols Postfix"
+      Description="Append the given argument to all global or extern variables."
+      Switch="--postfix [value]" />
     <StringListProperty
       Name="IncludePaths"
-      Subcategory="Configuration"
-      HelpContext="0"
-      DisplayName="Include Paths"
-      Description="Set the paths for any additional include files"
-      Switch="-i &quot;[value]&quot;" />
-
+      Category="General"
+      DisplayName="Include File Search Directories"
+      Description="Sets path for include files."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-i"
+      Switch="-I&quot;[value]/&quot;" />
     <StringListProperty
-      Name="Defines"
-      Category="Symbols"
-      Subcategory="Pre-Defined Symbols"
-      HelpContext="0"
-      DisplayName="Defined Symbols"
-      Description="Specify pre-defined symbols ('symbol' or 'symbol = value') "
-      Switch="-d &quot;[value]&quot;" />
-    
+      Name="PreIncludeFiles"
+      Category="General"
+      DisplayName="Pre-Include a File"
+      Description="Force files to be pre-included into source file."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-p"
+      Switch="-P&quot;[value]&quot;" />
     <StringListProperty
-      Name="UnDefines"
-      Category="Symbols"
-      Subcategory="Pre-Defined Symbols"
-      HelpContext="0"
-      DisplayName="Remove Symbols"
-      Description="Remove pre-defined symbols "
-      Switch="-u &quot;[value]&quot;" />
-    
-    <StringProperty
-      Name="ObjectFile"
-      Subcategory="Output"
-      HelpContext="0"
-      DisplayName="Object File Name"
-      Description="Select the output file name"
-      Switch="-o &quot;[value]&quot;" />
-    
-    <StringProperty
-      Name="ListFile"
-      Category="Files"
-      Subcategory="Output"
-      HelpContext="0"
-      DisplayName="List File Name"
-      Description="Select an output listing by setting its file name"
-      Switch="-l &quot;[value]&quot;" />
-    
-    <StringProperty
-      Name="PreIncludeFile"
-      Category="Files"
-      Subcategory="Configuration"
-      HelpContext="0"
-      DisplayName="Pre Include File"
-      Description="Select a pre-included file by setting its name"
-      Switch="-P &quot;[value]&quot;" />
-      
-    <StringProperty
-      Name="MapFile"
-      Category="Files"
-      Subcategory="Output"
-      HelpContext="0"
-      DisplayName="Map File Name"
-      Description="Select a map output by setting its file name"
-      Switch="--mapdir= &quot;[value]&quot;" />
-
-    <StringProperty
-      Name="ErrorFile"
-      Category="Files"
-      Subcategory="Output"
-      HelpContext="0"
-      DisplayName="Error File Name"
-      Description="Send error/warning messages to a file by setting its name"
-      Switch="-E &quot;[value]&quot;" />
-
-    <StringProperty
-      Name="SymbolPrefix"
-      Category="Symbols"
-      Subcategory="Symbols"
-      HelpContext="0"
-      DisplayName="External Symbol Prefix"
-      Description="Prepend symbol to all external symbols"
-      Switch="--prefix &quot;[value]&quot;" />
-
-    <StringProperty
-      Name="SymbolSuffix"
-      Category="Symbols"
-      Subcategory="Symbols"
-      HelpContext="0"
-      DisplayName="External Symbol Suffix"
-      Description="Append symbol to all external symbols"
-      Switch="--suffix &quot;[value]&quot;" />
-
+      Name="PreprocessorDefinitions"
+      Category="Preprocessor"
+      DisplayName="Preprocessor Definitions"
+      Description="Defines a text macro with the given name."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-d"
+      Switch="-D[value]" />
+    <StringListProperty
+      Name="UndefinePreprocessorDefinitions"
+      Category="Preprocessor"
+      DisplayName="Undefine Preprocessor Definitions"
+      Description="Undefines a text macro with the given name."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-u"
+      Switch="-U[value]" />
     <EnumProperty
-      Name="PreProc"
-      Subcategory="Configuration"
-      HelpContext="0"
+      Name="Preprocessor"
+      Category="Preprocessor"
       DisplayName="Pre-Processor"
-      Description="Select the pre-processor ('nasm' or 'raw')">
+      Description="Select the pre-processor to use on the input file"
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-preproc">
       <EnumValue
         Name="0"
-        DisplayName="Nasm "
+        DisplayName="Nasm"
         Switch="-rnasm" />
       <EnumValue
         Name="1"
         DisplayName="Raw"
         Switch="-rraw" />
     </EnumProperty>
-    
     <EnumProperty
       Name="Parser"
-      Subcategory="Configuration"
-      HelpContext="0"
+      Category="Preprocessor"
       DisplayName="Parser"
-      Description="Select the parser for Intel ('nasm') or AT&amp;T ( 'gas') syntax">
+      Description="Select the parser (the assembler syntax)"
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-parser">
       <EnumValue
         Name="0"
         DisplayName="Nasm"
@@ -185,18 +132,23 @@
         DisplayName="Gas"
         Switch="-pgas" />
     </EnumProperty>
-    
+    <BoolProperty
+      Name="TreatWarningsAsErrors"
+      Category="Assembler Options"
+      DisplayName="Treat Warnings As Errors"
+      Description="Returns an error code if warnings are generated."
+      HelpUrl="http://www.tortall.net/projects/yasm/manual/html/yasm-options.html#yasm-option-werror"
+      Switch="-Werror" />
     <StringProperty
       Name="CommandLineTemplate"
       DisplayName="Command Line"
       Visible="False"
       IncludeInCommandLine="False" />
-    
     <DynamicEnumProperty
-      Name="YASMBeforeTargets"
-      Category="General"
-      EnumProvider="Targets"
-      IncludeInCommandLine="False">
+        Name="YASMBeforeTargets"
+        Category="General"
+        EnumProvider="Targets"
+        IncludeInCommandLine="False">
       <DynamicEnumProperty.DisplayName>
         <sys:String>Execute Before</sys:String>
       </DynamicEnumProperty.DisplayName>
@@ -211,10 +163,10 @@
       <DynamicEnumProperty.DataSource>
         <DataSource
           Persistence="ProjectFile"
+          ItemType=""
           HasConfigurationCondition="true" />
       </DynamicEnumProperty.DataSource>
     </DynamicEnumProperty>
-    
     <DynamicEnumProperty
       Name="YASMAfterTargets"
       Category="General"
@@ -238,25 +190,16 @@
           HasConfigurationCondition="true" />
       </DynamicEnumProperty.DataSource>
     </DynamicEnumProperty>
-    
-    <StringListProperty
-      Name="Outputs"
-      DisplayName="Outputs"
-      Visible="False"
-      IncludeInCommandLine="False" />
-    
     <StringProperty
       Name="ExecutionDescription"
       DisplayName="Execution Description"
-      Visible="False"
-      IncludeInCommandLine="False" />
-    
+      IncludeInCommandLine="False"
+      Visible="False" />
     <StringListProperty
       Name="AdditionalDependencies"
       DisplayName="Additional Dependencies"
       IncludeInCommandLine="False"
-      Visible="true" />
-    
+      Visible="False" />
     <StringProperty
       Subtype="AdditionalOptions"
       Name="AdditionalOptions"
@@ -269,15 +212,14 @@
       </StringProperty.Description>
     </StringProperty>
   </Rule>
-  
   <ItemType
     Name="YASM"
-    DisplayName="Yasm Assembler" />
+    DisplayName="Yasm Modular Assembler" />
   <FileExtension
-    Name="*.asm"
+    Name="*.asm;*.s"
     ContentType="YASM" />
   <ContentType
     Name="YASM"
-    DisplayName="Yasm Assembler"
+    DisplayName="Yasm Modular Assembler"
     ItemType="YASM" />
 </ProjectSchemaDefinitions>

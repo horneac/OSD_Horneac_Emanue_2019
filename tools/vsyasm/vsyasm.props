@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup
     Condition="'$(YASMBeforeTargets)' == '' and '$(YASMAfterTargets)' == '' and '$(ConfigurationType)' != 'Makefile'">
@@ -6,22 +6,18 @@
     <YASMAfterTargets>CustomBuild</YASMAfterTargets>
   </PropertyGroup>
   <PropertyGroup>
-    <YASMDependsOn
-      Condition="'$(ConfigurationType)' != 'Makefile'">_SelectedFiles;$(YASMDependsOn)</YASMDependsOn>
-  </PropertyGroup>
-  <PropertyGroup>
-    <YasmPath Condition= "'$(YASMPATH)' == ''">$(VCInstallDir)bin\</YasmPath>
+    <YasmPath Condition= "'$(YASMPATH)' == ''">$(SolutionDir)..\tools\vsyasm\</YasmPath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <YASM>
-      <Debug>False</Debug>
-      <ObjectFile>$(IntDir)</ObjectFile>
-      <PreProc>0</PreProc>
+      <Preprocessor>0</Preprocessor>
       <Parser>0</Parser>
-      <CommandLineTemplate>"$(SolutionDir)..\tools\vsyasm\vsyasm.exe" -Xvc -f $(Platform) [AllOptions] [AdditionalOptions] [Inputs]</CommandLineTemplate>
-      <Outputs>%(ObjectFile)</Outputs>
-      <ExecutionDescription>Assembling %(Filename)%(Extension)</ExecutionDescription>
-      <ShowOnlyRuleProperties>false</ShowOnlyRuleProperties>
+      <ObjectFileName>$(IntDir)%(FileName).obj</ObjectFileName>
+      <CommandLineTemplate Condition="'$(Platform)' == 'Win32'">"$(YasmPath)"vsyasm.exe -Xvc -f win32 [AllOptions] [AdditionalOptions] "%(FullPath)"</CommandLineTemplate>
+      <CommandLineTemplate Condition="'$(Platform)' == 'x64'">"$(YasmPath)"vsyasm.exe -Xvc -f win64 [AllOptions] [AdditionalOptions] "%(FullPath)"</CommandLineTemplate>
+      <CommandLineTemplate Condition="'$(Platform)' != 'Win32' and '$(Platform)' != 'x64'">echo YASM not supported on this platform
+exit 1</CommandLineTemplate>
+      <ExecutionDescription>%(Identity)</ExecutionDescription>
     </YASM>
   </ItemDefinitionGroup>
 </Project>
