@@ -706,8 +706,8 @@ SetCurrentThread(
     pCpu = GetCurrentPcpu();
     ASSERT(pCpu != NULL);
 
-    pCpu->ThreadData.CurrentThread = Thread;
-    if (NULL != Thread)
+    pCpu->ThreadData.CurrentThread = Thread->Self;
+    if (NULL != Thread->Self)
     {
         pCpu->StackTop = Thread->InitialStackBase;
         pCpu->StackSize = Thread->StackSize;

@@ -301,12 +301,30 @@ CpuMuAllocCpu(
     return status;
 }
 
+// this has nothing to do with the thread system, it is a `hack` used to
+// have the same consistency through GetCurrentThread() calls since
+// `CpuMuInitCpu` was called until the first thread is setup on the CPU in
+// `ThreadSystemInitMainForCurrentCPU`
+
+// PS: next year we might want to create a real `THREAD_HEADER` structure in `thread_internal.h` to have a cleaner solution
+// However, as not to confuse people by updating the `THREAD` structure after the semester has started this is the current solution
+typedef struct _DUMMY_THREAD
+{
+    REF_COUNT               RefCnt;
+
+    struct _THREAD          *Self;
+} DUMMY_THREAD;
+static_assert(sizeof(DUMMY_THREAD) == FIELD_OFFSET(THREAD, Id) && FIELD_OFFSET(DUMMY_THREAD, Self) == FIELD_OFFSET(THREAD, Self),
+    "Safety measure, if someone modified the THREAD structure we may need to modify this DUMMY_THREAD as well");
+
 STATUS
 CpuMuInitCpu(
     IN          PPCPU       PhysicalCpu,
     IN          BOOLEAN     ChangeStack
     )
 {
+    // mark .Self as NULL such that GetCurrentThread will return always NULL until we setup the first real thread later in the boot
+    static DUMMY_THREAD __dummySelfThread = { .Self = NULL };
     STATUS status;
 
     ASSERT( NULL != PhysicalCpu );
@@ -321,7 +339,7 @@ CpuMuInitCpu(
 
     // write CPU structure to GS
     SetCurrentPcpu(PhysicalCpu);
-    SetCurrentThread(NULL);
+    SetCurrentThread((PTHREAD)&__dummySelfThread);
 
     // we assume we haven't used more than 1 PAGE of our stack
     if (ChangeStack)
